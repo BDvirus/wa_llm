@@ -4,15 +4,25 @@ services:
       file: docker-compose.base.yml
       service: postgres
     restart: always
+    # Stack-unique aliases on the internal network. The shared proxy network
+    # may hold other stacks' `postgres`/`whatsapp`/`web-server`, and Docker DNS
+    # would then resolve the generic names to the wrong container.
+    networks:
+      default:
+        aliases: [wa-llm-postgres]
 
   whatsapp:
     extends:
       file: docker-compose.base.yml
       service: whatsapp
     environment:
-      - WHATSAPP_WEBHOOK=http://web-server:8000/webhook
+      - WHATSAPP_WEBHOOK=http://wa-llm-web:8000/webhook
+      - DB_URI=postgres://user:password@wa-llm-postgres:5432/webhook_db?sslmode=disable
     restart: always
-    networks: [default, proxy]
+    networks:
+      default:
+        aliases: [wa-llm-gowa]
+      proxy: {}
     labels:
       - traefik.enable=true
       - traefik.docker.network=${TRAEFIK_NETWORK:-proxy}
@@ -29,7 +39,10 @@ services:
       - .env.prod
     # No published port: the admin UI and API are reached through Traefik,
     # behind Authentik. gowa still reaches /webhook on the default network.
-    networks: [default, proxy]
+    networks:
+      default:
+        aliases: [wa-llm-web]
+      proxy: {}
     labels:
       - traefik.enable=true
       - traefik.docker.network=${TRAEFIK_NETWORK:-proxy}
@@ -45,8 +58,8 @@ services:
         condition: service_started
     environment:
       - PORT=8000
-      - DB_URI=postgresql+asyncpg://user:password@postgres:5432/postgres
-      - WHATSAPP_HOST=http://whatsapp:3000
+      - DB_URI=postgresql+asyncpg://user:password@wa-llm-postgres:5432/postgres
+      - WHATSAPP_HOST=http://wa-llm-gowa:3000
       # Trust X-Forwarded-Proto from Traefik so generated URLs stay https.
       # Set to Traefik's IP or subnet to narrow it; * trusts any peer on the network.
       - FORWARDED_ALLOW_IPS=${FORWARDED_ALLOW_IPS:-*}

@@ -127,6 +127,11 @@ async def verify_webhook_signature(
 > - `FORWARDED_ALLOW_IPS=*` ל-web-server — אחרת uvicorn לא סומך על `X-Forwarded-Proto` מ-Traefik
 >   ובונה קישורי `http://` שהדפדפן חוסם בדף https.
 >
+> - **aliases ייחודיים לכל שירות** (`wa-llm-postgres`, `wa-llm-gowa`, `wa-llm-web`) ברשת הפנימית,
+>   ושימוש בהם בכל החיבורים הפנימיים. רשת ה-proxy משותפת לכל ה-stacks, ושם גנרי כמו `postgres`
+>   עלול להיפתר ל-Postgres של stack אחר — זה בדיוק מה שהפיל את gowa בפריסה הראשונה
+>   (`password authentication failed for user "user"`).
+>
 > כמו כן, `ports` של gowa עבר מ-`base` לקבצי הפיתוח. Postgres נשאר על `5432` לפי החלטה.
 > אגב כך תוקן באג קיים: `docker-compose.yml` ו-`docker-compose.local-run.yml` לא הצהירו על
 > ה-volume `wa_llm_whatsapp_statics`, ולכן היו לא תקינים.

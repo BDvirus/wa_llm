@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- Source code: `src/` — key packages: `api/`, `handler/`, `models/`, `whatsapp/`, `utils/`, `config/`.
+- Source code: `src/` — key packages: `api/`, `handler/`, `models/`, `whatsapp/`, `utils/`, `config/`, `admin/` (the `/admin` page: FastAPI + Jinja2 + vendored htmx; templates must stay `.html` so autoescape applies).
 - Application entrypoint: `app/main.py` (starts FastAPI, wiring DB, WhatsApp client).
 - Migrations: `migrations/` with `alembic.ini`.
 - Tests are colocated with code: `src/**/test_*.py` (e.g., `src/whatsapp/test_jid.py`).
@@ -25,6 +25,7 @@
 - Frameworks: `pytest`, `pytest-asyncio`, `pytest-cov`.
 - Test files: `test_*.py` next to modules (e.g., `src/handler/test_router.py`).
 - Use `AsyncMock`/fixtures (see `src/test_utils/`) and avoid real network/DB calls.
+- Exception: where SQL itself is the logic, mark tests `@pytest.mark.integration` and use the `db_session` fixture (`src/test_utils/db.py`). They run against `TEST_DB_URI` (a disposable pgvector Postgres) and are skipped when it is unset; CI sets it.
 - Coverage: `pytest --cov=src` (XML written to `coverage.xml`).
 
 ## Commit & Pull Request Guidelines

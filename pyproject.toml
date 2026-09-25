@@ -21,6 +21,7 @@ dependencies = [
     "uvicorn>=0.50.2",
     "voyageai>=0.4.1",
     "gowa>=0.1.0",
+    "python-multipart>=0.0.27",
 ]
 
 [dependency-groups]
@@ -90,6 +91,9 @@ typeCheckingMode = "basic"
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
 log_cli = true
+markers = [
+    "integration: needs a real Postgres via TEST_DB_URI (skipped otherwise)",
+]
 
 [tool.logfire]
 pydantic_plugin_record = "failure"

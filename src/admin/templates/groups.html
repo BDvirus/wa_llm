@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block content %}
+<header class="masthead">
+  <div class="masthead__text">
+    <p class="eyebrow"><span class="dot dot--signal" aria-hidden="true"></span>wa_llm · לוח בקרה</p>
+    <h1>ניהול קבוצות</h1>
+    <p class="stats">
+      <span class="stat"><span class="num">{{ managed_count }}</span> מנוהלות</span>
+      <span class="stat"><span class="num">{{ items | length }}</span> קבוצות</span>
+      {% if running_count %}
+      <span class="stat stat--running"><span class="num">{{ running_count }}</span> עבודות רצות</span>
+      {% endif %}
+    </p>
+  </div>
+  {% if items %}
+  <label class="filter">
+    <span class="visually-hidden">סינון קבוצות</span>
+    <input type="search" id="filter" placeholder="סינון לפי שם או מזהה…" autocomplete="off" spellcheck="false">
+  </label>
+  {% endif %}
+</header>
+
+{% if not gowa_ok %}
+<div class="banner banner--warn" role="status">
+  <strong>gowa לא זמין.</strong>
+  אי אפשר לזהות את הבוט, ולכן ספירות ה"ממתינות" כוללות גם את ההודעות שלו — הן מעט גבוהות מהאמת.
+</div>
+{% endif %}
+
+{% if items %}
+<div class="sheet">
+  <table class="groups">
+    <thead>
+      <tr>
+        <th scope="col">קבוצה</th>
+        <th scope="col">מנוהלת</th>
+        <th scope="col">התראות ספאם</th>
+        <th scope="col">הודעות</th>
+        <th scope="col">ידע</th>
+        <th scope="col">ממתינות</th>
+        <th scope="col">קהילה</th>
+        <th scope="col">פעולות</th>
+      </tr>
+    </thead>
+    <tbody id="rows">
+      {% for item in items %}{% include "_row.html" %}{% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="empty empty--filter" hidden>אין קבוצות שתואמות לסינון.</p>
+{% else %}
+<div class="empty">
+  <p><strong>אין עדיין קבוצות.</strong></p>
+  <p>קבוצה מופיעה כאן אחרי שמצרפים את הבוט אליה והיא מסונכרנת מול gowa.</p>
+</div>
+{% endif %}
+{% endblock %}

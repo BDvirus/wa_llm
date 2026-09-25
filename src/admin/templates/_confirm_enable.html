@@ -1,0 +1,46 @@
+{% set jid = row.group_jid | urlencode %}
+<form class="confirm" hx-post="/admin/groups/{{ jid }}/managed"
+      hx-target="#{{ row.group_jid | dom_id }}" hx-swap="outerHTML">
+  <input type="hidden" name="enabled" value="true">
+
+  <p class="eyebrow">הפעלת הבוט</p>
+  <h2 id="dialog-title"><bdi>{{ row.display_name }}</bdi></h2>
+
+  <dl class="figures">
+    <div class="figure{% if backlog %} figure--amber{% endif %}">
+      <dt>ממתינות לסיכום</dt>
+      <dd class="num">{{ "{:,}".format(row.pending_summary) }}</dd>
+    </div>
+    <div class="figure">
+      <dt>ממתינות לבניית ידע</dt>
+      <dd class="num">{{ "{:,}".format(row.pending_ingest) }}</dd>
+    </div>
+    <div class="figure">
+      <dt>מצטברות מאז</dt>
+      <dd>{{ row.last_summary_sync | relative }}</dd>
+    </div>
+  </dl>
+
+  {% if backlog %}
+  <p class="callout callout--amber">
+    בלי איפוס, הסיכום הראשון ישלח את כל {{ "{:,}".format(row.pending_summary) }} ההודעות ל-LLM בקריאה אחת
+    (מעל {{ threshold }} נחשב עומס). זה יקר, ועלול לחרוג מחלון ההקשר של המודל.
+  </p>
+  {% endif %}
+  {% if not gowa_ok %}
+  <p class="callout">gowa לא זמין, ולכן הספירות כוללות גם הודעות של הבוט.</p>
+  {% endif %}
+
+  <label class="check">
+    <input type="checkbox" name="start_fresh" value="true" checked>
+    <span>
+      <strong>להתחיל מעכשיו</strong>
+      <small>איפוס חלונות הסיכום ובניית הידע לרגע זה. ההודעות הקיימות לא ייכנסו לבסיס הידע ולא לסיכום.</small>
+    </span>
+  </label>
+
+  <div class="actions">
+    <button type="button" class="btn" data-close-dialog>ביטול</button>
+    <button type="submit" class="btn btn--primary">הפעלת הבוט</button>
+  </div>
+</form>

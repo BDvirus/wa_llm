@@ -1,0 +1,23 @@
+{% set jid = job.group_jid | urlencode %}
+{% set status = job.status %}
+<div class="job{% if status %} job--{{ status.state.value }}{% endif %}"
+     id="{{ job.group_jid | dom_id }}-job-{{ job.kind.value }}"
+     {% if job.running %}hx-get="/admin/groups/{{ jid }}/jobs/{{ job.kind.value }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+  <button type="button" class="btn btn--small"
+          hx-post="/admin/groups/{{ jid }}/jobs/{{ job.kind.value }}"
+          hx-target="closest .job" hx-swap="outerHTML"
+          {% if job.kind.value == "summarize" %}hx-confirm="לשלוח עכשיו סיכום אמיתי לקבוצה «{{ job.group_name }}» ולקבוצות הקהילה שלה?"{% endif %}
+          {% if job.running %}disabled{% endif %}>
+    {% if job.kind.value == "ingest" %}בניית ידע{% else %}שליחת סיכום{% endif %}
+  </button>
+  {% if status %}
+  <span class="job__status" title="{{ status.message }}">
+    {% if job.running %}
+    <span class="dot dot--running" aria-hidden="true"></span>רץ · התחיל {{ status.started_at | relative }}
+    {% else %}
+    <span class="dot dot--{{ status.state.value }}" aria-hidden="true"></span>{{ status.message }}
+    <span class="sub">{{ status.finished_at | relative }}</span>
+    {% endif %}
+  </span>
+  {% endif %}
+</div>

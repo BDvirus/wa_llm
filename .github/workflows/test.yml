@@ -47,6 +47,10 @@ jobs:
       - name: Install the project
         run: uv sync --all-extras --dev
       - name: Test with pytest
+        env:
+          # Integration tests (marked `integration`) run against the postgres
+          # service above; without this they are skipped.
+          TEST_DB_URI: postgresql+asyncpg://user:password@localhost:5432/test_db
         run: |
           uv run coverage run --source=pytest_evals -m pytest --junitxml=junit/test-results.xml
           uv run coverage xml coverage.xml

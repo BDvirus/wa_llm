@@ -1,0 +1,106 @@
+{% set row = item.row %}
+{% set jid = row.group_jid | urlencode %}
+<tr id="{{ row.group_jid | dom_id }}"
+    class="row{% if row.managed %} is-managed{% endif %}{% if fresh %} is-fresh{% endif %}"
+    data-search="{{ (row.display_name ~ ' ' ~ row.group_jid) | lower }}">
+
+  <td class="c-group" data-label="קבוצה">
+    {# <bdi> isolates direction: a Latin or mixed name must not be reordered by the RTL page. #}
+    {% if row.group_name %}
+    <span class="group-name"><bdi>{{ row.group_name }}</bdi></span>
+    {% else %}
+    <span class="group-name group-name--unnamed">ללא שם</span>
+    {% endif %}
+    <span class="jid" dir="ltr">{{ row.group_jid }}</span>
+    {% if row.group_topic %}<span class="topic" title="{{ row.group_topic }}">{{ row.group_topic }}</span>{% endif %}
+  </td>
+
+  <td class="c-switch" data-label="מנוהלת">
+    {% if row.managed %}
+    <button type="button" class="switch" role="switch" aria-checked="true"
+            aria-label="כיבוי הבוט בקבוצה {{ row.display_name }}"
+            hx-post="/admin/groups/{{ jid }}/managed"
+            hx-target="closest tr" hx-swap="outerHTML"><span class="switch__knob"></span></button>
+    {% else %}
+    {# Turning it on opens a confirmation with the backlog - never flips directly. #}
+    <button type="button" class="switch" role="switch" aria-checked="false"
+            aria-label="הפעלת הבוט בקבוצה {{ row.display_name }}"
+            hx-get="/admin/groups/{{ jid }}/enable"
+            hx-target="#dialog-body" hx-swap="innerHTML"><span class="switch__knob"></span></button>
+    {% endif %}
+  </td>
+
+  <td class="c-switch" data-label="התראות ספאם">
+    {% if row.notify_on_spam %}
+    <button type="button" class="switch" role="switch" aria-checked="true"
+            aria-label="כיבוי התראות ספאם בקבוצה {{ row.display_name }}"
+            hx-post="/admin/groups/{{ jid }}/spam"
+            hx-target="closest tr" hx-swap="outerHTML"><span class="switch__knob"></span></button>
+    {% elif row.owner_jid %}
+    <button type="button" class="switch" role="switch" aria-checked="false"
+            aria-label="הפעלת התראות ספאם בקבוצה {{ row.display_name }}"
+            hx-post="/admin/groups/{{ jid }}/spam" hx-vals='{"enabled": "true"}'
+            hx-target="closest tr" hx-swap="outerHTML"><span class="switch__knob"></span></button>
+    {% else %}
+    <button type="button" class="switch" role="switch" aria-checked="false" disabled
+            aria-describedby="{{ row.group_jid | dom_id }}-no-owner"><span class="switch__knob"></span></button>
+    <span class="hint" id="{{ row.group_jid | dom_id }}-no-owner">אין בעלים לתייג</span>
+    {% endif %}
+  </td>
+
+  <td class="c-num" data-label="הודעות">
+    <span class="num num--lg">{{ "{:,}".format(row.total) }}</span>
+    <span class="sub">{{ row.last_activity | relative }}</span>
+  </td>
+
+  <td class="c-num" data-label="ידע">
+    <span class="num num--lg">{{ "{:,}".format(row.topics) }}</span>
+    <span class="sub">נושאים</span>
+  </td>
+
+  <td class="c-pending" data-label="ממתינות">
+    <div class="pending pending--{{ item.level.value }}">
+      <div class="pending__line">
+        <span class="pending__label">לסיכום</span>
+        <span class="num">{{ "{:,}".format(row.pending_summary) }}</span>
+      </div>
+      <span class="meter" style="--fill: {{ '%.3f' | format(item.fill) }}" aria-hidden="true"><span></span></span>
+      {% if item.level.value == "backlog" %}
+      <span class="badge badge--amber">עומס — סיכום ראשון כבד</span>
+      {% elif item.level.value == "below-minimum" and row.managed %}
+      <span class="hint">פחות מ-15 — סיכום לא יישלח</span>
+      {% endif %}
+      <div class="pending__line pending__line--minor">
+        <span class="pending__label">לבניית ידע</span>
+        <span class="num">{{ "{:,}".format(row.pending_ingest) }}</span>
+      </div>
+    </div>
+  </td>
+
+  <td class="c-community" data-label="קהילה">
+    {% if row.community_keys %}
+    <ul class="chips" aria-label="מפתחות קהילה">
+      {% for key in row.community_keys %}<li class="chip" dir="ltr">{{ key }}</li>{% endfor %}
+    </ul>
+    {% endif %}
+    {% if item.related %}
+    <p class="related" title="מפתחות משותפים מאחדים גם את חיפוש הידע, לא רק את שליחת הסיכומים">
+      משותף עם {% for name in item.related %}<bdi>{{ name }}</bdi>{% if not loop.last %}, {% endif %}{% endfor %}
+    </p>
+    {% endif %}
+    <details class="edit">
+      <summary>{% if row.community_keys %}עריכה{% else %}הוספת מפתחות{% endif %}</summary>
+      <form hx-post="/admin/groups/{{ jid }}/community-keys" hx-target="closest tr" hx-swap="outerHTML">
+        <label class="visually-hidden" for="{{ row.group_jid | dom_id }}-keys">מפתחות קהילה, מופרדים בפסיקים</label>
+        <input id="{{ row.group_jid | dom_id }}-keys" name="keys" dir="ltr" autocomplete="off" spellcheck="false"
+               value="{{ (row.community_keys or []) | join(', ') }}" placeholder="genai, founders">
+        <button type="submit" class="btn btn--small">שמירה</button>
+      </form>
+      <p class="fine">מפתח משותף מאחד את הקבוצות: סיכומים נשלחים לכולן, וחיפוש הידע מתפרש על כולן.</p>
+    </details>
+  </td>
+
+  <td class="c-jobs" data-label="פעולות">
+    {% for job in item.jobs %}{% include "_job.html" %}{% endfor %}
+  </td>
+</tr>

@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>{% block title %}ניהול קבוצות{% endblock %} · wa_llm</title>
+  {# Fixed paths, not url_for: behind a proxy url_for can emit http:// URLs. #}
+  <link rel="stylesheet" href="/admin/static/admin.css">
+  <script src="/admin/static/htmx.min.js" defer></script>
+  <script src="/admin/static/admin.js" defer></script>
+</head>
+<body>
+  <main class="shell">
+    {% block content %}{% endblock %}
+  </main>
+  <dialog id="dialog" class="dialog" aria-labelledby="dialog-title">
+    <div id="dialog-body"></div>
+  </dialog>
+  <div id="toast" class="toast" role="alert" hidden></div>
+</body>
+</html>

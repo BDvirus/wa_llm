@@ -3,11 +3,15 @@ from contextlib import asynccontextmanager
 from warnings import warn
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from sqlmodel.ext.asyncio.session import AsyncSession
 import logging
 import logfire
 
+from admin.jobs import JobRegistry
+from admin.router import STATIC_DIR as ADMIN_STATIC_DIR
+from admin.router import router as admin_router
 from api import load_new_kbtopics_api, status, summarize_and_send_to_group_api, webhook
 import models  # noqa
 from config import get_settings
@@ -66,9 +70,12 @@ async def lifespan(app: FastAPI):
     app.state.embedding_client = AsyncClient(
         api_key=settings.voyage_api_key, max_retries=settings.voyage_max_retries
     )
+    app.state.jobs = JobRegistry()
     try:
         yield
     finally:
+        # Cancel admin jobs first: they use the engine being disposed below.
+        await app.state.jobs.shutdown()
         await engine.dispose()
 
 
@@ -86,6 +93,9 @@ app.include_router(webhook.router)
 app.include_router(status.router)
 app.include_router(summarize_and_send_to_group_api.router)
 app.include_router(load_new_kbtopics_api.router)
+app.include_router(admin_router)
+# Mounted on the app itself: include_router() does not carry mounts over.
+app.mount("/admin/static", StaticFiles(directory=ADMIN_STATIC_DIR), name="admin-static")
 
 if __name__ == "__main__":
     import uvicorn

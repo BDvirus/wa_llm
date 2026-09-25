@@ -1,11 +1,11 @@
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from utils.relative_time import format_relative
 
 from admin.display import (
     PendingLevel,
     dom_id,
-    format_relative,
     meter_fill,
     pending_level,
     related_groups,

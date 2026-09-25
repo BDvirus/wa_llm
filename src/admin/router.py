@@ -13,12 +13,12 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from api.deps import get_db_async_session, get_whatsapp
 from models import Group
 from whatsapp import WhatsAppClient
+from utils.relative_time import format_relative
 
 from .display import (
     BACKLOG_WARNING_THRESHOLD,
     PendingLevel,
     dom_id,
-    format_relative,
     meter_fill,
     pending_level,
     related_groups,
@@ -29,11 +29,13 @@ from .queries import (
     CommunityEntry,
     GroupNotFoundError,
     GroupRow,
+    PrivateChatNeedsManagedError,
     SpamNeedsOwnerError,
     fetch_community_index,
     fetch_group_row,
     fetch_group_rows,
     set_community_keys,
+    set_dm_queries,
     set_managed,
     set_notify_on_spam,
 )
@@ -218,6 +220,30 @@ async def update_spam(
         return PlainTextResponse(
             "אי אפשר להפעיל התראות ספאם בקבוצה בלי בעלים — אין את מי לתייג",
             status_code=422,
+        )
+    return await _render_row(request, session, whatsapp, jobs, group_jid)
+
+
+@router.post(
+    "/groups/{group_jid}/private-chat",
+    dependencies=HtmxOnly,
+    response_class=HTMLResponse,
+)
+async def update_private_chat(
+    request: Request,
+    group_jid: str,
+    session: Session,
+    whatsapp: WhatsApp,
+    jobs: Jobs,
+    enabled: Annotated[bool, Form()] = False,
+):
+    try:
+        await set_dm_queries(session, group_jid, enabled=enabled)
+    except GroupNotFoundError:
+        return PlainTextResponse("הקבוצה לא נמצאה", status_code=404)
+    except PrivateChatNeedsManagedError:
+        return PlainTextResponse(
+            "אפשר לפתוח שאלות פרטיות רק בקבוצה שהבוט מנהל", status_code=422
         )
     return await _render_row(request, session, whatsapp, jobs, group_jid)
 

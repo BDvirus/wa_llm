@@ -12,14 +12,32 @@ services:
     environment:
       - WHATSAPP_WEBHOOK=http://web-server:8000/webhook
     restart: always
+    networks: [default, proxy]
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=${TRAEFIK_NETWORK:-proxy}
+      - traefik.http.routers.gowa.rule=Host(`${GOWA_HOST:?set GOWA_HOST}`)
+      - traefik.http.routers.gowa.entrypoints=${TRAEFIK_ENTRYPOINT:-websecure}
+      - traefik.http.routers.gowa.tls=true
+      - traefik.http.routers.gowa.middlewares=${AUTHENTIK_MIDDLEWARE:-authentik@docker}
+      - traefik.http.services.gowa.loadbalancer.server.port=3000
 
   web-server:
     #image: ghcr.io/ilanbenb/wa_llm:1.4.10
     image: ghcr.io/bdvirus/wa_llm:main
     env_file:
       - .env.prod
-    ports:
-      - "8000:8000"
+    # No published port: the admin UI and API are reached through Traefik,
+    # behind Authentik. gowa still reaches /webhook on the default network.
+    networks: [default, proxy]
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=${TRAEFIK_NETWORK:-proxy}
+      - traefik.http.routers.wa-llm.rule=Host(`${WA_LLM_HOST:?set WA_LLM_HOST}`)
+      - traefik.http.routers.wa-llm.entrypoints=${TRAEFIK_ENTRYPOINT:-websecure}
+      - traefik.http.routers.wa-llm.tls=true
+      - traefik.http.routers.wa-llm.middlewares=${AUTHENTIK_MIDDLEWARE:-authentik@docker}
+      - traefik.http.services.wa-llm.loadbalancer.server.port=8000
     depends_on:
       postgres:
         condition: service_healthy
@@ -29,7 +47,15 @@ services:
       - PORT=8000
       - DB_URI=postgresql+asyncpg://user:password@postgres:5432/postgres
       - WHATSAPP_HOST=http://whatsapp:3000
+      # Trust X-Forwarded-Proto from Traefik so generated URLs stay https.
+      # Set to Traefik's IP or subnet to narrow it; * trusts any peer on the network.
+      - FORWARDED_ALLOW_IPS=${FORWARDED_ALLOW_IPS:-*}
     restart: always
+
+networks:
+  proxy:
+    external: true
+    name: ${TRAEFIK_NETWORK:-proxy}
 
 volumes:
   wa_llm_whatsapp:

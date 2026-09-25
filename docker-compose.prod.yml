@@ -29,7 +29,8 @@ services:
       - traefik.http.routers.gowa.rule=Host(`${GOWA_HOST:?set GOWA_HOST}`)
       - traefik.http.routers.gowa.entrypoints=${TRAEFIK_ENTRYPOINT:-websecure}
       - traefik.http.routers.gowa.tls=true
-      - traefik.http.routers.gowa.middlewares=${AUTHENTIK_MIDDLEWARE:-authentik@docker}
+      # TEMP (testing): Authentik disabled - re-enable before real use.
+      # - traefik.http.routers.gowa.middlewares=${AUTHENTIK_MIDDLEWARE:-authentik@docker}
       - traefik.http.services.gowa.loadbalancer.server.port=3000
 
   web-server:
@@ -49,7 +50,8 @@ services:
       - traefik.http.routers.wa-llm.rule=Host(`${WA_LLM_HOST:?set WA_LLM_HOST}`)
       - traefik.http.routers.wa-llm.entrypoints=${TRAEFIK_ENTRYPOINT:-websecure}
       - traefik.http.routers.wa-llm.tls=true
-      - traefik.http.routers.wa-llm.middlewares=${AUTHENTIK_MIDDLEWARE:-authentik@docker}
+      # TEMP (testing): Authentik disabled - re-enable before real use.
+      # - traefik.http.routers.wa-llm.middlewares=${AUTHENTIK_MIDDLEWARE:-authentik@docker}
       - traefik.http.services.wa-llm.loadbalancer.server.port=8000
     depends_on:
       postgres:

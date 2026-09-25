@@ -58,6 +58,9 @@ class Settings(BaseSettings):
         "Hello, I am not designed to answer to personal messages."
     )
 
+    # Private chat: requests one user may make in a rolling 24h window.
+    dm_daily_quota: int = 20
+
     # QA tester settings (user JIDs allowed to use /kb_qa command)
     qa_testers: list[str] = []
 

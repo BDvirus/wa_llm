@@ -32,6 +32,8 @@ class BaseGroup(SQLModel):
     )
     managed: bool = Field(default=False)
     notify_on_spam: bool = Field(default=False)
+    # Members may query this group's knowledge in a private chat with the bot.
+    dm_queries_enabled: bool = Field(default=False)
     community_keys: Optional[List[str]] = Field(
         default=None, sa_column=Column(ARRAY(String))
     )

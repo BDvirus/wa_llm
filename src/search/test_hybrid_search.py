@@ -5,7 +5,12 @@ from datetime import datetime
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from models import KBTopic, Message, Group
-from search.hybrid_search import hybrid_search, keyword_search
+from search.hybrid_search import (
+    get_messages_for_topic,
+    hybrid_search,
+    keyword_search,
+    vector_search,
+)
 
 
 @pytest.mark.asyncio
@@ -142,3 +147,93 @@ async def test_keyword_search_multi_language(mock_session: AsyncSession):
 
     assert len(results) > 0
     assert results[0][0].message_id == message.message_id
+
+
+# --- Group scoping is enforced in the search layer itself ------------------
+
+
+class TestGroupScopeIsRequired:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("group_jids", [[], None])
+    async def test_vector_search_refuses_unscoped(self, mock_session, group_jids):
+        with pytest.raises(ValueError):
+            await vector_search(mock_session, [0.1] * 1024, group_jids)  # type: ignore[arg-type]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("group_jids", [[], None])
+    async def test_keyword_search_refuses_unscoped(self, mock_session, group_jids):
+        with pytest.raises(ValueError):
+            await keyword_search(mock_session, "q", group_jids)  # type: ignore[arg-type]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("group_jids", [[], None])
+    async def test_hybrid_search_refuses_unscoped(self, mock_session, group_jids):
+        with pytest.raises(ValueError):
+            await hybrid_search(mock_session, "q", [0.1] * 1024, group_jids)  # type: ignore[arg-type]
+
+    @pytest.mark.asyncio
+    async def test_keyword_search_always_filters_by_group(self, mock_session):
+        result = MagicMock()
+        result.fetchall.return_value = []
+        cast(MagicMock, mock_session.execute).side_effect = None
+        cast(MagicMock, mock_session.execute).return_value = result
+
+        await keyword_search(mock_session, "q", ["g1@g.us"])
+
+        sql = str(cast(MagicMock, mock_session.execute).await_args.args[0])
+        assert "m.group_jid = ANY(:group_jids)" in sql
+        assert "m.group_jid IS NOT NULL" in sql
+
+
+@pytest.mark.integration
+async def test_topic_messages_from_other_groups_are_never_returned(db_session):
+    from models import Sender
+    from models.kb_topic_message import KBTopicMessage
+
+    db_session.add_all(
+        [
+            Sender(jid="u@s.whatsapp.net"),
+            Group(group_jid="mine@g.us"),
+            Group(group_jid="other@g.us"),
+        ]
+    )
+    await db_session.flush()
+    db_session.add_all(
+        [
+            Message(
+                message_id="m-mine",
+                chat_jid="mine@g.us",
+                group_jid="mine@g.us",
+                sender_jid="u@s.whatsapp.net",
+                text="mine",
+            ),
+            Message(
+                message_id="m-other",
+                chat_jid="other@g.us",
+                group_jid="other@g.us",
+                sender_jid="u@s.whatsapp.net",
+                text="other",
+            ),
+            KBTopic(
+                id="t1",
+                group_jid="mine@g.us",
+                speakers="",
+                subject="s",
+                summary="s",
+                embedding=[0.0] * 1024,
+            ),
+        ]
+    )
+    await db_session.flush()
+    # A (corrupt) link from a topic in my group to another group's message.
+    db_session.add_all(
+        [
+            KBTopicMessage(kb_topic_id="t1", message_id="m-mine"),
+            KBTopicMessage(kb_topic_id="t1", message_id="m-other"),
+        ]
+    )
+    await db_session.commit()
+
+    messages = await get_messages_for_topic(db_session, "t1", ["mine@g.us"])
+
+    assert [m.message_id for m in messages] == ["m-mine"]

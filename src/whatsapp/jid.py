@@ -107,6 +107,23 @@ def normalize_jid(jid: Union[JID, str]) -> str:
     return str(jid.to_non_ad())
 
 
+def normalize_identity(value: str | None) -> str | None:
+    """One canonical string per WhatsApp identity, for membership matching.
+
+    normalize_jid already drops agent/device parts on s.whatsapp.net, but
+    parse_jid leaves a device suffix on other servers, so "123:5@lid" and
+    "123@lid" would not match. Strip it for every server here.
+    """
+    if value is None or not value.strip():
+        return None
+    user, sep, server = value.strip().partition("@")
+    if not sep:
+        return normalize_jid(value.strip())
+    if server == DefaultUserServer:
+        return normalize_jid(f"{user}@{server}")
+    return f"{user.split(':', 1)[0]}@{server}"
+
+
 # Known JID servers on WhatsApp
 DefaultUserServer = "s.whatsapp.net"
 GroupServer = "g.us"

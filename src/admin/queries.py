@@ -17,6 +17,10 @@ class SpamNeedsOwnerError(ValueError):
     """Enabling spam alerts needs an owner to tag; the handler asserts on it."""
 
 
+class PrivateChatNeedsManagedError(ValueError):
+    """Private questions only make sense for a group the bot actually manages."""
+
+
 @dataclass(frozen=True)
 class GroupRow:
     group_jid: str
@@ -25,6 +29,7 @@ class GroupRow:
     owner_jid: str | None
     managed: bool
     notify_on_spam: bool
+    dm_queries_enabled: bool
     community_keys: list[str] | None
     last_ingest: datetime
     last_summary_sync: datetime
@@ -33,6 +38,7 @@ class GroupRow:
     pending_ingest: int
     pending_summary: int
     topics: int
+    members: int
 
     @property
     def display_name(self) -> str:
@@ -59,7 +65,7 @@ class CommunityEntry:
 # the UTC offset; that affects display only.
 _GROUP_ROWS_SQL = """
     SELECT g.group_jid, g.group_name, g.group_topic, g.owner_jid,
-           g.managed, g.notify_on_spam, g.community_keys,
+           g.managed, g.notify_on_spam, g.dm_queries_enabled, g.community_keys,
            g.last_ingest, g.last_summary_sync,
            count(m.message_id) AS total,
            max(m.timestamp) AS last_activity,
@@ -69,14 +75,20 @@ _GROUP_ROWS_SQL = """
            count(m.message_id) FILTER (
                WHERE m.timestamp >= g.last_summary_sync AND m.sender_jid <> :bot
            ) AS pending_summary,
-           coalesce(t.topics, 0) AS topics
+           coalesce(t.topics, 0) AS topics,
+           coalesce(gm.members, 0) AS members
     FROM "group" g
     LEFT JOIN message m ON m.group_jid = g.group_jid
     LEFT JOIN (
         SELECT group_jid, count(*) AS topics FROM kbtopic GROUP BY group_jid
     ) t ON t.group_jid = g.group_jid
+    LEFT JOIN (
+        -- DISTINCT participant: one person has a row per identity (JID, LID).
+        SELECT group_jid, count(DISTINCT participant) AS members
+        FROM group_member GROUP BY group_jid
+    ) gm ON gm.group_jid = g.group_jid
     {where}
-    GROUP BY g.group_jid, t.topics
+    GROUP BY g.group_jid, t.topics, gm.members
     ORDER BY g.managed DESC, max(m.timestamp) DESC NULLS LAST, g.group_name
 """
 
@@ -131,6 +143,9 @@ async def set_managed(
 ) -> None:
     group = await _get_group(session, group_jid)
     group.managed = enabled
+    if not enabled:
+        # Re-managing later must not silently reopen private questions.
+        group.dm_queries_enabled = False
     if enabled and start_fresh:
         # Python's naive datetime.now(), like the rest of the codebase. SQL
         # now() would be cast through the Postgres session timezone instead.
@@ -159,5 +174,17 @@ async def set_community_keys(
 ) -> None:
     group = await _get_group(session, group_jid)
     group.community_keys = keys
+    session.add(group)
+    await session.commit()
+
+
+async def set_dm_queries(
+    session: AsyncSession, group_jid: str, *, enabled: bool
+) -> None:
+    group = await _get_group(session, group_jid)
+    # Turning it off always works; turning it on requires a managed group.
+    if enabled and not group.managed:
+        raise PrivateChatNeedsManagedError(group_jid)
+    group.dm_queries_enabled = enabled
     session.add(group)
     await session.commit()

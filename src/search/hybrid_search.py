@@ -16,6 +16,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from models import KBTopic, Message
 from models.kb_topic_message import KBTopicMessage
+from utils.redact import UNKNOWN_PERSON, redact_phones
 
 
 logger = logging.getLogger(__name__)
@@ -31,10 +32,22 @@ class SearchResult:
     keyword_rank: float = 0.0
 
 
+def _require_groups(group_jids: List[str]) -> List[str]:
+    """Refuse unscoped searches.
+
+    Every search must name the groups it may read. An empty or missing list
+    used to mean "all groups", which would leak other groups' knowledge into
+    private chats - so it is an error rather than a default.
+    """
+    if not group_jids:
+        raise ValueError("search requires at least one group_jid")
+    return group_jids
+
+
 async def vector_search(
     session: AsyncSession,
     query_embedding: List[float],
-    group_jids: List[str] | None = None,
+    group_jids: List[str],
     limit: int = 10,
 ) -> List[Tuple[KBTopic, float]]:
     """
@@ -43,23 +56,22 @@ async def vector_search(
     Args:
         session: Database session
         query_embedding: Embedding vector for the search query
-        group_jids: Optional list of group JIDs to filter by
+        group_jids: Groups to search (required, non-empty)
         limit: Maximum number of results to return
 
     Returns:
         List of tuples containing (KBTopic, cosine_distance)
     """
+    _require_groups(group_jids)
     q = (
         select(
             KBTopic,
             KBTopic.embedding.cosine_distance(query_embedding).label("cosine_distance"),
         )
+        .where(cast(KBTopic.group_jid, String).in_(group_jids))
         .order_by(KBTopic.embedding.cosine_distance(query_embedding))
         .limit(limit)
     )
-
-    if group_jids:
-        q = q.where(cast(KBTopic.group_jid, String).in_(group_jids))
 
     result = await session.exec(q)
     return [(topic, distance) for topic, distance in result]
@@ -68,7 +80,7 @@ async def vector_search(
 async def keyword_search(
     session: AsyncSession,
     query: str,
-    group_jids: List[str] | None = None,
+    group_jids: List[str],
     limit: int = 20,
 ) -> List[Tuple[Message, float]]:
     """
@@ -77,32 +89,24 @@ async def keyword_search(
     Args:
         session: Database session
         query: The search query string
-        group_jids: Optional list of group JIDs to filter by
+        group_jids: Groups to search (required, non-empty)
         limit: Maximum number of results to return
 
     Returns:
         List of tuples containing (Message, ts_rank score)
     """
-    # Build the full-text search query dynamically
-    # We use plainto_tsquery for simple keyword matching
-    # Note: We build the query conditionally to avoid asyncpg AmbiguousParameterError
-    # when group_jids is None (asyncpg can't infer the type of a NULL array parameter)
-
-    base_query = """
+    _require_groups(group_jids)
+    # plainto_tsquery for simple keyword matching. Private chats have a NULL
+    # group_jid; the IS NOT NULL keeps them out even if a caller's list is odd.
+    search_query = text("""
         SELECT m.*, ts_rank(to_tsvector('simple', COALESCE(m.text, '')), plainto_tsquery('simple', :query)) as rank
         FROM message m
         WHERE to_tsvector('simple', COALESCE(m.text, '')) @@ plainto_tsquery('simple', :query)
-    """
-
-    params: dict = {"query": query, "limit": limit}
-
-    if group_jids:
-        base_query += " AND m.group_jid = ANY(:group_jids)"
-        params["group_jids"] = group_jids
-
-    base_query += " ORDER BY rank DESC LIMIT :limit"
-
-    search_query = text(base_query)
+          AND m.group_jid IS NOT NULL
+          AND m.group_jid = ANY(:group_jids)
+        ORDER BY rank DESC LIMIT :limit
+    """)
+    params: dict = {"query": query, "limit": limit, "group_jids": group_jids}
 
     result = await session.execute(search_query, params)
 
@@ -128,23 +132,31 @@ async def keyword_search(
 async def get_messages_for_topic(
     session: AsyncSession,
     topic_id: str,
+    group_jids: List[str],
     limit: int = 10,
 ) -> List[Message]:
     """
     Get the source messages that were used to create a topic.
 
+    Links are same-group by construction, but the fallback message id
+    (`na-<timestamp>`) is a global key that can collide across groups, so the
+    group filter is applied here too rather than trusted.
+
     Args:
         session: Database session
         topic_id: The KB topic ID
+        group_jids: Groups whose messages may be returned (required, non-empty)
         limit: Maximum number of messages to return
 
     Returns:
         List of Message objects linked to the topic
     """
+    _require_groups(group_jids)
     q = (
         select(Message)
         .join(KBTopicMessage, col(Message.message_id) == col(KBTopicMessage.message_id))
         .where(col(KBTopicMessage.kb_topic_id) == topic_id)
+        .where(col(Message.group_jid).in_(group_jids))
         .limit(limit)
     )
 
@@ -156,7 +168,7 @@ async def hybrid_search(
     session: AsyncSession,
     query: str,
     query_embedding: List[float],
-    group_jids: List[str] | None = None,
+    group_jids: List[str],
     vector_limit: int = 10,
     messages_per_topic: int = 5,
 ) -> List[SearchResult]:
@@ -172,13 +184,14 @@ async def hybrid_search(
         session: Database session
         query: The text search query
         query_embedding: Embedding vector for the search query
-        group_jids: Optional list of group JIDs to filter by
+        group_jids: Groups to search (required, non-empty)
         vector_limit: Maximum number of topics from vector search
         messages_per_topic: Maximum messages to retrieve per topic
 
     Returns:
         List of SearchResult objects containing topics and their messages
     """
+    _require_groups(group_jids)
     # Step 1: Vector search for similar topics
     vector_results = await vector_search(
         session, query_embedding, group_jids, vector_limit
@@ -212,6 +225,7 @@ async def hybrid_search(
             select(KBTopic, KBTopicMessage.message_id)
             .join(KBTopicMessage, col(KBTopic.id) == col(KBTopicMessage.kb_topic_id))
             .where(col(KBTopicMessage.message_id).in_(msg_ids))
+            .where(cast(KBTopic.group_jid, String).in_(group_jids))
         )
 
         topic_rows = await session.exec(q)
@@ -236,7 +250,9 @@ async def hybrid_search(
     final_results = []
     for topic_id, result in results_map.items():
         # Get messages for this topic
-        messages = await get_messages_for_topic(session, topic_id, messages_per_topic)
+        messages = await get_messages_for_topic(
+            session, topic_id, group_jids, messages_per_topic
+        )
         result.messages = messages
         final_results.append(result)
 
@@ -256,13 +272,18 @@ async def hybrid_search(
 def format_search_results_for_prompt(
     results: List[SearchResult],
     opt_out_map: dict[str, str] | None = None,
+    group_names: dict[str, str] | None = None,
+    private: bool = False,
 ) -> str:
     """
     Format search results for inclusion in an LLM prompt.
 
     Args:
         results: List of SearchResult objects
-        opt_out_map: Optional mapping of JIDs to display names for privacy
+        opt_out_map: Mapping of phone user part -> display name
+        group_names: When given, each topic is labeled with its group's name
+        private: For a private chat - senders shown by name (never number) and
+            phone numbers inside the text replaced with names
 
     Returns:
         Formatted string suitable for LLM prompt inclusion
@@ -270,25 +291,33 @@ def format_search_results_for_prompt(
     if not results:
         return "No related topics found."
 
+    names = opt_out_map or {}
+
+    def clean(text: str) -> str:
+        return redact_phones(text, names) if private else text
+
     formatted_parts = []
 
     for result in results:
         topic = result.topic
 
         # Format topic header
-        topic_text = f"## {topic.subject}\n{topic.summary}"
+        label = ""
+        if group_names and topic.group_jid in group_names:
+            label = f"[{group_names[topic.group_jid]}] "
+        topic_text = f"## {label}{clean(topic.subject)}\n{clean(topic.summary)}"
 
         # Format associated messages if available
         if result.messages:
             message_texts = []
             for msg in result.messages:
                 if msg.text:
-                    sender = (
-                        msg.sender_jid.split("@")[0] if msg.sender_jid else "Unknown"
-                    )
-                    if opt_out_map:
-                        sender = opt_out_map.get(sender, f"@{sender}")
-                    message_texts.append(f"- {sender}: {msg.text[:200]}...")
+                    user = msg.sender_jid.split("@")[0] if msg.sender_jid else ""
+                    if private:
+                        sender = names.get(user, UNKNOWN_PERSON)
+                    else:
+                        sender = names.get(user, f"@{user}") if user else "Unknown"
+                    message_texts.append(f"- {sender}: {clean(msg.text[:200])}...")
 
             if message_texts:
                 topic_text += "\n\n### Related Messages:\n" + "\n".join(message_texts)

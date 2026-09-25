@@ -4,6 +4,7 @@ from whatsapp.jid import (
     JID,
     JIDParseError,
     new_ad_jid,
+    normalize_identity,
     normalize_jid,
     parse_jid,
 )
@@ -64,3 +65,23 @@ def test_invalid_jid():
 
     with pytest.raises(JIDParseError):
         parse_jid("1234567890.1:abc@s.whatsapp.net")
+
+
+class TestNormalizeIdentity:
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            ("1234567890@s.whatsapp.net", "1234567890@s.whatsapp.net"),
+            ("1234567890.1:1@s.whatsapp.net", "1234567890@s.whatsapp.net"),
+            ("1234567890:7@s.whatsapp.net", "1234567890@s.whatsapp.net"),
+            ("98765432109876@lid", "98765432109876@lid"),
+            ("98765432109876:5@lid", "98765432109876@lid"),
+            ("  98765432109876@lid ", "98765432109876@lid"),
+        ],
+    )
+    def test_one_shape_per_identity(self, raw, expected):
+        assert normalize_identity(raw) == expected
+
+    @pytest.mark.parametrize("raw", [None, "", "   "])
+    def test_empty_is_none(self, raw):
+        assert normalize_identity(raw) is None

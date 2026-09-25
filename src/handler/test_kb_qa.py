@@ -75,13 +75,15 @@ async def test_kb_qa_handler_success(
         )
         await handler(test_message)
 
-        # Verify KnowledgeBaseAnswers was called with correct synthetic message
-        mock_kb_instance.assert_called_once()
-        call_args = mock_kb_instance.call_args[0][0]
-        assert isinstance(call_args, Message)
-        assert call_args.text == "query"
-        assert call_args.group_jid == "target@g.us"
-        assert call_args.chat_jid == "allowed@g.us"
+        # The search is scoped to the target group ONLY (it used to be unscoped:
+        # a synthetic Message had no loaded `group`), and the reply goes back
+        # to the chat the command came from.
+        mock_kb_instance.respond.assert_awaited_once()
+        kwargs = mock_kb_instance.respond.await_args.kwargs
+        assert kwargs["scope"].group_jids == ["target@g.us"]
+        assert kwargs["query"] == "query"
+        assert kwargs["chat_jid"] == "allowed@g.us"
+        assert kwargs["sender_jid"] == "tester@s.whatsapp.net"
 
 
 @pytest.mark.asyncio

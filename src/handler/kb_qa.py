@@ -5,7 +5,7 @@ from voyageai.client_async import AsyncClient
 
 from config import Settings
 from handler.base_handler import BaseHandler
-from handler.knowledge_base_answers import KnowledgeBaseAnswers
+from handler.knowledge_base_answers import AnswerScope, KnowledgeBaseAnswers
 from models import Message, Group
 from whatsapp import WhatsAppClient
 
@@ -145,15 +145,12 @@ class KBQAHandler(BaseHandler):
             f"QA command: querying group '{target_group.group_name}' with: {query}"
         )
 
-        # Create a synthetic message pointing to the target group
-        qa_message = Message(
-            message_id=message.message_id,
-            timestamp=message.timestamp,
-            text=query,
-            chat_jid=message.chat_jid,  # Reply to original chat
+        # Search only the target group, reply in the chat the command came from.
+        # The scope is passed explicitly: a synthetic Message has no loaded
+        # `group` relationship, which previously left the search unscoped.
+        await self.ask_knowledge_base.respond(
+            chat_jid=message.chat_jid,
+            query=query,
             sender_jid=message.sender_jid,
-            group_jid=target_group.group_jid,  # But search in target group
+            scope=AnswerScope(group_jids=[target_group.group_jid]),
         )
-
-        # Run the knowledge base search
-        await self.ask_knowledge_base(qa_message)

@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from admin import router as admin_router_module
 from admin.jobs import JobKind, JobOutcome, JobRegistry, JobState
-from admin.queries import GroupRow, SpamNeedsOwnerError
+from admin.queries import GroupRow, PrivateChatNeedsManagedError, SpamNeedsOwnerError
 from api.deps import get_db_async_session, get_whatsapp
 from models import Group
 from whatsapp.jid import JID
@@ -25,6 +25,7 @@ def make_row(**overrides) -> GroupRow:
         owner_jid="111@s.whatsapp.net",
         managed=False,
         notify_on_spam=False,
+        dm_queries_enabled=False,
         community_keys=None,
         last_ingest=datetime(2026, 1, 1),
         last_summary_sync=datetime(2026, 1, 1),
@@ -33,6 +34,7 @@ def make_row(**overrides) -> GroupRow:
         pending_ingest=30,
         pending_summary=30,
         topics=3,
+        members=12,
     )
     return GroupRow(**{**values, **overrides})
 
@@ -88,8 +90,11 @@ def queries():
         patch.object(admin_router_module, "set_managed", AsyncMock()) as managed,
         patch.object(admin_router_module, "set_notify_on_spam", AsyncMock()) as spam,
         patch.object(admin_router_module, "set_community_keys", AsyncMock()) as keys,
+        patch.object(admin_router_module, "set_dm_queries", AsyncMock()) as dm,
     ):
-        yield MagicMock(rows=rows, row=row, managed=managed, spam=spam, keys=keys)
+        yield MagicMock(
+            rows=rows, row=row, managed=managed, spam=spam, keys=keys, dm=dm
+        )
 
 
 class TestPage:
@@ -274,3 +279,35 @@ async def _never_finishes(_: str) -> JobOutcome:
 
     await asyncio.sleep(3600)
     return JobOutcome(JobState.DONE, "")
+
+
+class TestPrivateChatToggle:
+    def test_enable(self, client, queries):
+        response = client.post(
+            f"/admin/groups/{JID_STR}/private-chat",
+            data={"enabled": "true"},
+            headers=HX,
+        )
+        assert response.status_code == 200
+        assert queries.dm.await_args.kwargs == {"enabled": True}
+
+    def test_enabling_an_unmanaged_group_is_rejected_server_side(self, client, queries):
+        queries.dm.side_effect = PrivateChatNeedsManagedError(JID_STR)
+        response = client.post(
+            f"/admin/groups/{JID_STR}/private-chat",
+            data={"enabled": "true"},
+            headers=HX,
+        )
+        assert response.status_code == 422
+
+    def test_switch_is_disabled_for_unmanaged_groups(self, client, queries):
+        queries.rows.return_value = [make_row(managed=False)]
+        assert "רק בקבוצה מנוהלת" in client.get("/admin").text
+
+    def test_requires_hx_request(self, client, queries):
+        assert client.post(f"/admin/groups/{JID_STR}/private-chat").status_code == 403
+
+    def test_member_count_and_unsynced_hint(self, client, queries):
+        assert "12 חברים" in client.get("/admin").text
+        queries.rows.return_value = [make_row(members=0)]
+        assert "חברים לא סונכרנו" in client.get("/admin").text

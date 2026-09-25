@@ -7,7 +7,7 @@ from pydantic_ai import Agent
 from pydantic_ai.agent import AgentRunResult
 
 from handler.router import Router, IntentEnum, Intent
-from models import Message
+from models import Group, Message
 from test_utils.mock_session import AsyncSessionMock
 from whatsapp import SendMessageRequest
 from whatsapp.jid import JID
@@ -103,7 +103,10 @@ async def test_router_ask_question_route(
         return mock_result
 
     mock_session.exec.side_effect = mock_exec_side_effect
-    mock_session.get = AsyncMock(return_value=None)  # No existing records
+    # Questions are answered only within a group's scope: the group must exist.
+    mock_session.get = AsyncMock(
+        side_effect=lambda model, key: Group(group_jid=key) if model is Group else None
+    )
     mock_session.add = AsyncMock()  # Mock add operation
     mock_session.flush = AsyncMock()  # Mock flush operation
 
@@ -126,13 +129,15 @@ async def test_router_ask_question_route(
     # Create router instance
     router = Router(mock_session, mock_whatsapp, mock_embedding_client, mock_settings)
 
-    # Test the route
+    # A question asked in a group chat.
+    test_message.chat_jid = "group@g.us"
+    test_message.group_jid = "group@g.us"
     await router(test_message)
 
     # Verify the message was sent
     mock_whatsapp.send_message.assert_called_once_with(
         SendMessageRequest(
-            phone="user@s.whatsapp.net",
+            phone="group@g.us",
             message="cool response",
         )
     )

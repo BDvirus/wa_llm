@@ -13,33 +13,48 @@ flowchart TD
     COMMIT --> HASTEXT{"message exists<br/>and has text?"}
     HASTEXT -->|"no"| STOP1(["return"])
 
-    HASTEXT -->|"yes"| SELF{"sender == bot jid?"}
+    HASTEXT -->|"yes"| SELF{"is_from_me, or<br/>sender == bot jid?"}
     SELF -->|"yes"| STOP2(["return - avoid self-reply loop"])
 
-    SELF -->|"no"| ISDM{"message.group is None?<br/>(direct message)"}
+    SELF -->|"no"| DEDUPE{"message_id in<br/>TTLCache?<br/>maxsize 1000, ttl 4 min<br/>(now before every branch)"}
+    DEDUPE -->|"yes"| STOP5(["return - duplicate webhook<br/>gowa retries after 10s"])
 
-    ISDM -->|"yes - DM"| CMD{"text.strip.lower"}
+    DEDUPE -->|"no - mark as seen"| ISDM{"group_jid is NULL?<br/>(not a group)"}
+    ISDM -->|"yes"| PERSON{"chat is a person?<br/>s.whatsapp.net / lid"}
+    PERSON -->|"no: status, broadcast,<br/>newsletter"| STOP6B(["return - never reply publicly"])
+    PERSON -->|"yes - private chat"| CMD{"text.strip.lower"}
     CMD -->|"opt-out"| OO["insert OptOut<br/>reply: you will no longer be tagged"]
     CMD -->|"opt-in"| OI["delete OptOut<br/>reply: you will now be tagged"]
     CMD -->|"status"| OS["reply: currently opted in/out"]
-    CMD -->|"anything else"| AUTO{"DM_AUTOREPLY_ENABLED?"}
+    CMD -->|"anything else"| ALLOWED{"allowed_groups:<br/>member (jid or lid) of a group<br/>managed AND dm_queries_enabled?"}
+    ALLOWED -->|"none"| AUTO{"DM_AUTOREPLY_ENABLED?"}
     AUTO -->|"true"| AUTOMSG["send DM_AUTOREPLY_MESSAGE"]
     AUTO -->|"false"| STOP3(["return - silent"])
+    ALLOWED -->|"one or more"| QUOTA{"requests in last 24h<br/>> DM_DAILY_QUOTA?"}
+    QUOTA -->|"yes"| QUOTAMSG["reply: quota reached<br/>no LLM call"]
+    QUOTA -->|"no"| PROUTE{"keyword route"}
+    PROUTE -->|"עזרה"| PHELP["list user's groups<br/>and commands"]
+    PROUTE -->|"חפש ..."| PSEARCH["keyword_search<br/>scoped to user's groups<br/>names, never numbers"]
+    PROUTE -->|"מה פספסתי"| PCATCH["bounded catch-up<br/>100/group, 300 total<br/>one LLM call"]
+    PROUTE -->|"anything else"| PASK["RAG, private scope<br/>only user's groups<br/>numbers redacted"]
     OO --> STOP4(["return"])
     OI --> STOP4
     OS --> STOP4
     AUTOMSG --> STOP4
+    QUOTAMSG --> STOP4
+    PHELP --> SEND
+    PSEARCH --> SEND
+    PCATCH --> SEND
+    PASK --> SEND
 
-    ISDM -->|"no - group"| DEDUPE{"message_id in<br/>TTLCache?<br/>maxsize 1000, ttl 4 min"}
-    DEDUPE -->|"yes"| STOP5(["return - duplicate webhook"])
-
-    DEDUPE -->|"no - mark as seen"| KBQA{"text starts with<br/>'/kb_qa '?"}
+    ISDM -->|"no - group"| KBQA
+    KBQA{"text starts with<br/>'/kb_qa '?"}
 
     KBQA -->|"yes"| WL{"chat_jid in<br/>QA_TEST_GROUPS?"}
     WL -->|"no"| SILENT1(["SILENT FAILURE<br/>log warning only"])
     WL -->|"yes"| TESTER{"sender_jid in<br/>QA_TESTERS?"}
     TESTER -->|"no"| SILENT2(["SILENT FAILURE<br/>log warning only"])
-    TESTER -->|"yes"| KBQAH["KBQAHandler<br/>cross-group KB search<br/>works even if group is NOT managed"]
+    TESTER -->|"yes"| KBQAH["KBQAHandler<br/>KB search scoped to the target group<br/>works even if group is NOT managed"]
     KBQAH --> SEND
 
     KBQA -->|"no"| MANAGED{"group.managed?"}
@@ -72,8 +87,8 @@ flowchart TD
     classDef llm fill:#f4f1fa,stroke:#5b4a96,color:#332a57
     classDef gate fill:#fdf1e3,stroke:#9c5a1a,color:#5c3410
 
-    class STOP1,STOP2,STOP3,STOP4,STOP5,STOP6,STOP7,IGN1,OK terminal
+    class STOP1,STOP2,STOP3,STOP4,STOP5,STOP6,STOP6B,STOP7,IGN1,OK terminal
     class SILENT1,SILENT2 danger
     class STORE,COMMIT,GSYNC,SEND,OO,OI,OS,AUTOMSG action
-    class ROUTER,SUM,RAG,SPAM,KBQAH llm
-    class MANAGED,MENTION,DEDUPE,SPAMFLAG,WL,TESTER gate
+    class ROUTER,SUM,RAG,SPAM,KBQAH,PASK,PCATCH llm
+    class MANAGED,MENTION,DEDUPE,SPAMFLAG,WL,TESTER,PERSON,ALLOWED,QUOTA gate

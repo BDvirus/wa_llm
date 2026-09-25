@@ -1,7 +1,8 @@
+from datetime import datetime
 from typing import TYPE_CHECKING, List, Optional
 
 from pydantic import field_validator
-from sqlmodel import Field, Relationship, SQLModel
+from sqlmodel import Column, DateTime, Field, Relationship, SQLModel
 
 from whatsapp.jid import normalize_jid
 
@@ -14,6 +15,10 @@ if TYPE_CHECKING:
 class BaseSender(SQLModel):
     jid: str = Field(primary_key=True, max_length=255)
     push_name: Optional[str] = Field(default=None, max_length=255)
+    # When this user last asked the bot "what did I miss" in a private chat.
+    last_catchup_at: Optional[datetime] = Field(
+        default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
+    )
 
     @field_validator("jid", mode="before")
     @classmethod

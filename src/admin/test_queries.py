@@ -11,11 +11,13 @@ from admin.queries import (
     fetch_community_index,
     fetch_group_row,
     fetch_group_rows,
+    PrivateChatNeedsManagedError,
     set_community_keys,
+    set_dm_queries,
     set_managed,
     set_notify_on_spam,
 )
-from models import Group, KBTopic, Message, Sender
+from models import Group, GroupMember, KBTopic, Message, Sender
 
 pytestmark = pytest.mark.integration
 
@@ -220,3 +222,44 @@ async def test_community_index_lists_only_groups_with_keys(db_session: AsyncSess
     assert [(e.group_jid, e.display_name, e.keys) for e in index] == [
         ("busy@g.us", "Busy", ["genai"])
     ]
+
+
+async def test_members_count_people_not_identities(db_session: AsyncSession):
+    await _seed(db_session)
+    db_session.add_all(
+        [
+            GroupMember(identity=ALICE, group_jid="busy@g.us", participant=ALICE),
+            GroupMember(identity="111@lid", group_jid="busy@g.us", participant=ALICE),
+            GroupMember(
+                identity="972502222222@s.whatsapp.net",
+                group_jid="busy@g.us",
+                participant="972502222222@s.whatsapp.net",
+            ),
+        ]
+    )
+    await db_session.commit()
+
+    busy = await _row(db_session, "busy@g.us")
+    assert busy.members == 2  # three identity rows, two people
+    assert busy.total == 4  # the member join must not multiply messages
+    assert (await _row(db_session, "quiet@g.us")).members == 0
+
+
+async def test_private_chat_needs_a_managed_group(db_session: AsyncSession):
+    await _seed(db_session)
+
+    with pytest.raises(PrivateChatNeedsManagedError):
+        await set_dm_queries(db_session, "quiet@g.us", enabled=True)
+    await set_dm_queries(db_session, "busy@g.us", enabled=True)
+
+    assert (await _row(db_session, "busy@g.us")).dm_queries_enabled is True
+
+
+async def test_unmanaging_closes_private_chat(db_session: AsyncSession):
+    await _seed(db_session)
+    await set_dm_queries(db_session, "busy@g.us", enabled=True)
+
+    await set_managed(db_session, "busy@g.us", enabled=False, start_fresh=False)
+    await set_managed(db_session, "busy@g.us", enabled=True, start_fresh=False)
+
+    assert (await _row(db_session, "busy@g.us")).dm_queries_enabled is False

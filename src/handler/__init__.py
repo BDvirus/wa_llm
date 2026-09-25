@@ -9,14 +9,34 @@ from config import Settings
 from handler.router import Router
 from handler.whatsapp_group_link_spam import WhatsappGroupLinkSpamHandler
 from handler.kb_qa import KBQAHandler
-from gowa_sdk.webhooks import WebhookEnvelope
+from gowa_sdk.webhooks import WebhookEnvelope, WebhookMessagePayload
+from private_chat.access import allowed_groups
+from private_chat.handler import PrivateChatHandler
 from whatsapp import WhatsAppClient
+from whatsapp.jid import (
+    DefaultUserServer,
+    HiddenUserServer,
+    JIDParseError,
+    normalize_identity,
+    parse_jid,
+)
 from .base_handler import BaseHandler
 from models import Message, OptOut
 from urllib.parse import urlparse
 import re
 
 logger = logging.getLogger(__name__)
+
+_PERSON_SERVERS = (DefaultUserServer, HiddenUserServer)
+
+
+def _is_person_chat(chat_jid: str) -> bool:
+    """True for one-to-one chats (phone JID or LID), not status/broadcast/newsletter."""
+    try:
+        return parse_jid(chat_jid).server in _PERSON_SERVERS
+    except JIDParseError:
+        return False
+
 
 # In-memory processing guard: 4 minutes TTL to prevent duplicate handling
 _processing_cache = TTLCache(maxsize=1000, ttl=4 * 60)
@@ -36,6 +56,9 @@ class MessageHandler(BaseHandler):
             session, whatsapp, embedding_client, settings
         )
         self.kb_qa_handler = KBQAHandler(session, whatsapp, embedding_client, settings)
+        self.private_chat = PrivateChatHandler(
+            session, whatsapp, embedding_client, settings
+        )
         self.settings = settings
         super().__init__(session, whatsapp, embedding_client)
 
@@ -50,7 +73,9 @@ class MessageHandler(BaseHandler):
         if not message or not message.text:
             return
 
-        # Ignore messages sent by the bot itself
+        # Ignore messages sent by the bot itself (also as echoed with a LID sender)
+        if payload.payload.get("is_from_me"):
+            return
         my_jid = await self.whatsapp.get_my_jid()
         if message.sender_jid == my_jid.normalize_str():
             return
@@ -60,29 +85,9 @@ class MessageHandler(BaseHandler):
                 f"Received message from {message.sender_jid}: {payload.model_dump_json()}"
             )
 
-        # direct message
-        if message and not message.group:
-            command = message.text.strip().lower()
-            if command == "opt-out":
-                await self.handle_opt_out(message)
-                return
-            elif command == "opt-in":
-                await self.handle_opt_in(message)
-                return
-            elif command == "status":
-                await self.handle_opt_status(message)
-                return
-            # if autoreply is enabled, send autoreply
-            elif self.settings.dm_autoreply_enabled:
-                await self.send_message(
-                    message.sender_jid,
-                    self.settings.dm_autoreply_message,
-                    message.message_id,
-                )
-            return
-
-        # In-memory dedupe: if this message is already being processed/recently processed, skip
-        if message and message.message_id:
+        # In-memory dedupe, before any branch: gowa retries after its 10s
+        # timeout, and a slow (LLM) reply would otherwise be sent twice.
+        if message.message_id:
             async with _processing_lock:
                 if message.message_id in _processing_cache:
                     logging.info(
@@ -90,6 +95,14 @@ class MessageHandler(BaseHandler):
                     )
                     return
                 _processing_cache[message.message_id] = True
+
+        # Not in a group: a private chat - but only with a person. Status
+        # updates, broadcast lists and newsletters also have no group, and a
+        # reply to their chat_jid would be posted publicly.
+        if message.group_jid is None:
+            if _is_person_chat(message.chat_jid):
+                await self._handle_private(message, payload)
+            return
 
         # Check for /kb_qa command (super admin only)
         # This does not have to be a managed group
@@ -123,6 +136,54 @@ class MessageHandler(BaseHandler):
         ):
             await self.whatsapp_group_link_spam(message)
             return
+
+    async def _handle_private(self, message: Message, payload: WebhookEnvelope) -> None:
+        text = message.text or ""
+        command = text.strip().lower()
+        if command == "opt-out":
+            await self.handle_opt_out(message)
+            return
+        if command == "opt-in":
+            await self.handle_opt_in(message)
+            return
+        if command == "status":
+            await self.handle_opt_status(message)
+            return
+
+        data = WebhookMessagePayload.model_validate(payload.payload)
+        identities = {
+            i
+            for i in (
+                normalize_identity(message.sender_jid),
+                normalize_identity(data.from_lid),
+            )
+            if i
+        }
+        # The webhook body is not signed yet, so chat_id and from/from_lid are
+        # independent claims. Replies go to chat_id: it must be the same person
+        # we authorize, or a forged body could route one member's answers to
+        # someone else's chat.
+        chat_identity = normalize_identity(message.chat_jid)
+        if chat_identity not in identities:
+            logger.warning(
+                "Private chat %s does not match sender identities %s; not answering",
+                message.chat_jid,
+                sorted(identities),
+            )
+            groups = []
+        else:
+            groups = await allowed_groups(self.session, identities)
+        if groups:
+            await self.private_chat(message, groups)
+            return
+
+        # Not a member of any group open to private questions: unchanged behaviour.
+        if self.settings.dm_autoreply_enabled:
+            await self.send_message(
+                message.chat_jid,
+                self.settings.dm_autoreply_message,
+                message.message_id,
+            )
 
     def _contains_whatsapp_group_link(self, text: str) -> bool:
         """

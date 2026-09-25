@@ -13,6 +13,11 @@
     {% endif %}
     <span class="jid" dir="ltr">{{ row.group_jid }}</span>
     {% if row.group_topic %}<span class="topic" title="{{ row.group_topic }}">{{ row.group_topic }}</span>{% endif %}
+    {% if row.members %}
+    <span class="sub">{{ row.members }} חברים</span>
+    {% else %}
+    <span class="hint" title="gowa לא החזיר משתתפים לקבוצה הזו — שאלות פרטיות לא יעבדו בה">חברים לא סונכרנו</span>
+    {% endif %}
   </td>
 
   <td class="c-switch" data-label="מנוהלת">
@@ -45,6 +50,24 @@
     <button type="button" class="switch" role="switch" aria-checked="false" disabled
             aria-describedby="{{ row.group_jid | dom_id }}-no-owner"><span class="switch__knob"></span></button>
     <span class="hint" id="{{ row.group_jid | dom_id }}-no-owner">אין בעלים לתייג</span>
+    {% endif %}
+  </td>
+
+  <td class="c-switch" data-label="שאלות פרטיות">
+    {% if row.managed and row.dm_queries_enabled %}
+    <button type="button" class="switch" role="switch" aria-checked="true"
+            aria-label="סגירת שאלות פרטיות על הקבוצה {{ row.display_name }}"
+            hx-post="/admin/groups/{{ jid }}/private-chat"
+            hx-target="closest tr" hx-swap="outerHTML"><span class="switch__knob"></span></button>
+    {% elif row.managed %}
+    <button type="button" class="switch" role="switch" aria-checked="false"
+            aria-label="פתיחת שאלות פרטיות על הקבוצה {{ row.display_name }}"
+            hx-post="/admin/groups/{{ jid }}/private-chat" hx-vals='{"enabled": "true"}'
+            hx-target="closest tr" hx-swap="outerHTML"><span class="switch__knob"></span></button>
+    {% else %}
+    <button type="button" class="switch" role="switch" aria-checked="false" disabled
+            aria-describedby="{{ row.group_jid | dom_id }}-dm-managed"><span class="switch__knob"></span></button>
+    <span class="hint" id="{{ row.group_jid | dom_id }}-dm-managed">רק בקבוצה מנוהלת</span>
     {% endif %}
   </td>
 

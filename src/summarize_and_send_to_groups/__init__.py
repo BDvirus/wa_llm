@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from datetime import datetime
+from typing import Literal
 
 from pydantic_ai import Agent
 from pydantic_ai.agent import AgentRunResult
@@ -21,6 +22,12 @@ from utils.opt_out import get_opt_out_map
 from whatsapp import WhatsAppClient, SendMessageRequest
 
 logger = logging.getLogger(__name__)
+
+# What happened on one group's summary run. Callers that only need to fire and
+# forget (the batch endpoint) can ignore it; the admin UI reports it verbatim.
+SummaryOutcome = Literal["too_few_messages", "summarize_failed", "send_failed", "sent"]
+
+MIN_MESSAGES_TO_SUMMARIZE = 15
 
 
 @retry(
@@ -48,7 +55,7 @@ async def summarize(
 
 async def summarize_and_send_to_group(
     settings: Settings, session, whatsapp: WhatsAppClient, group: Group
-):
+) -> SummaryOutcome:
     resp = await session.exec(
         select(Message)
         .where(Message.group_jid == group.group_jid)
@@ -58,9 +65,9 @@ async def summarize_and_send_to_group(
     )
     messages: list[Message] = resp.all()
 
-    if len(messages) < 15:
+    if len(messages) < MIN_MESSAGES_TO_SUMMARIZE:
         logging.info("Not enough messages to summarize in group %s", group.group_name)
-        return
+        return "too_few_messages"
 
     try:
         result = await summarize(
@@ -68,8 +75,9 @@ async def summarize_and_send_to_group(
         )
     except Exception as e:
         logging.error("Error summarizing group %s: %s", group.group_name, e)
-        return
+        return "summarize_failed"
 
+    outcome: SummaryOutcome = "sent"
     try:
         await whatsapp.send_message(
             SendMessageRequest(phone=group.group_jid, message=result.output)
@@ -84,12 +92,16 @@ async def summarize_and_send_to_group(
 
     except Exception as e:
         logging.error("Error sending message to group %s: %s", group.group_name, e)
+        outcome = "send_failed"
 
     finally:
-        # Update the group with the new last_summary_sync
+        # Update the group with the new last_summary_sync. Note this runs even
+        # when sending failed, so that summary is lost - reported as send_failed.
         group.last_summary_sync = datetime.now()
         session.add(group)
         await session.commit()
+
+    return outcome
 
 
 async def summarize_and_send_to_groups(

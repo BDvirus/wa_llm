@@ -1,6 +1,10 @@
 import pytest
 from datetime import datetime, timedelta
-from load_new_kbtopics import split_messages
+from unittest.mock import AsyncMock, MagicMock, patch
+
+from load_new_kbtopics import IngestResult, split_messages, topicsLoader
+from models import Group
+from whatsapp.jid import JID
 
 
 # Mock Message class since strictly typed object creation might be complex depending on deps
@@ -90,3 +94,46 @@ def test_split_max_size(create_messages):
 
 def test_empty_list():
     assert split_messages([]) == []
+
+
+# --- topicsLoader.load_topics reports what it processed -------------------
+
+
+def _loader_deps(messages):
+    result = MagicMock()
+    result.all.return_value = messages
+    session = MagicMock()
+    session.exec = AsyncMock(return_value=result)
+    whatsapp = AsyncMock()
+    whatsapp.get_my_jid = AsyncMock(
+        return_value=JID(user="bot", server="s.whatsapp.net")
+    )
+    return session, whatsapp
+
+
+@pytest.mark.asyncio
+async def test_load_topics_reports_zero_when_no_messages():
+    session, whatsapp = _loader_deps([])
+
+    result = await topicsLoader().load_topics(
+        session, Group(group_jid="g@g.us"), AsyncMock(), whatsapp
+    )
+
+    assert result == IngestResult(messages=0, chunks=0)
+
+
+@pytest.mark.asyncio
+async def test_load_topics_reports_messages_and_chunks(create_messages):
+    session, whatsapp = _loader_deps(create_messages([0, 0.1, 0.2]))
+
+    with (
+        patch("load_new_kbtopics.get_settings", return_value=MagicMock()),
+        patch("load_new_kbtopics.get_conversation_topics", AsyncMock(return_value=[])),
+        patch("load_new_kbtopics.load_topics", AsyncMock()) as store,
+    ):
+        result = await topicsLoader().load_topics(
+            session, Group(group_jid="g@g.us"), AsyncMock(), whatsapp
+        )
+
+    assert result == IngestResult(messages=3, chunks=1)
+    store.assert_awaited_once()

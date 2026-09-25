@@ -1,5 +1,6 @@
 import hashlib
 import logging
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, List
 
@@ -25,6 +26,14 @@ from utils.voyage_embed_text import voyage_embed_text
 from whatsapp import WhatsAppClient
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class IngestResult:
+    """What one group's ingest run processed, so callers can tell 'nothing new' apart from work done."""
+
+    messages: int
+    chunks: int
 
 
 class Topic(BaseModel):
@@ -251,10 +260,10 @@ class topicsLoader:
         group: Group,
         embedding_client: AsyncClient,
         whatsapp: WhatsAppClient,
-    ):
+    ) -> IngestResult:
         my_jid = await whatsapp.get_my_jid()
         try:
-            # Since yesterday at 12:00 UTC. Between 24 hours to 48 hours ago
+            # Everything since the group's last ingest window.
             stmt = (
                 select(Message)
                 .where(Message.timestamp >= group.last_ingest)
@@ -268,7 +277,7 @@ class topicsLoader:
 
             if len(messages) == 0:
                 logger.info(f"No messages found for group {group.group_name}")
-                return
+                return IngestResult(messages=0, chunks=0)
 
             # The result from DB is ordered by timestamp descending (see stmt above).
             # We need them ascending for splitting.
@@ -304,6 +313,7 @@ class topicsLoader:
                 )
 
             logger.info(f"All topics loaded for group {group.group_name}")
+            return IngestResult(messages=len(messages), chunks=len(conversation_chunks))
         except Exception as e:
             logger.error(f"Error loading topics for group {group.group_name}: {str(e)}")
             raise

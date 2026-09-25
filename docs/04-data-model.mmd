@@ -1,0 +1,70 @@
+---
+title: wa_llm - Data model (database "postgres", managed by Alembic)
+---
+erDiagram
+    sender ||--o{ message : "sends"
+    sender ||--o{ reaction : "reacts with"
+    sender ||--o{ group : "owns"
+    group  ||--o{ message : "contains"
+    group  ||--o{ kbtopic : "accumulates"
+    message ||--o{ reaction : "receives"
+    message ||--o{ message : "reply_to_id (self-reference)"
+    kbtopic ||--o{ kb_topic_message : ""
+    message ||--o{ kb_topic_message : ""
+
+    sender {
+        string jid PK "normalized to non-AD form"
+        string push_name "nullable - WhatsApp display name"
+    }
+
+    group {
+        string group_jid PK
+        string group_name "nullable"
+        string group_topic "nullable"
+        string owner_jid FK "nullable -> sender.jid"
+        bool managed "MASTER SWITCH - default false"
+        bool notify_on_spam "default false"
+        string_array community_keys "nullable - GIN index - links groups"
+        datetime last_ingest "KB ingest window start"
+        datetime last_summary_sync "summary window start"
+        datetime created_at "tz-aware"
+    }
+
+    message {
+        string message_id PK "from gowa, or na-<ts> fallback"
+        datetime timestamp "tz-aware - btree index"
+        string text "nullable - GIN tsvector index"
+        string media_url "nullable - extracted from untyped dict"
+        string chat_jid "group jid or DM jid"
+        string sender_jid FK "-> sender.jid"
+        string group_jid FK "nullable -> group.group_jid - btree index"
+        string reply_to_id "nullable - self-reference, NO FK constraint"
+    }
+
+    reaction {
+        int id PK "autoincrement"
+        string message_id FK "-> message.message_id"
+        string sender_jid FK "-> sender.jid"
+        string emoji "max 10 chars"
+        datetime timestamp "tz-aware"
+    }
+
+    kbtopic {
+        string id PK "sha256(group_jid + start_time + subject)"
+        string group_jid FK "nullable -> group.group_jid"
+        datetime start_time "first message of the chunk"
+        vector embedding "vector(1024) - HNSW cosine index"
+        string speakers "comma-separated - denormalized"
+        string subject "LLM generated"
+        string summary "LLM generated"
+    }
+
+    kb_topic_message {
+        string kb_topic_id PK,FK "-> kbtopic.id"
+        string message_id PK,FK "-> message.message_id"
+    }
+
+    opt_out {
+        string jid PK "NO foreign key to sender - stands alone"
+        datetime created_at "tz-aware"
+    }

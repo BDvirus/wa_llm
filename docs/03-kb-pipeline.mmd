@@ -1,0 +1,78 @@
+---
+title: wa_llm - Knowledge base pipelines (ingest is manual, query is live)
+---
+flowchart LR
+    subgraph INGEST["PIPELINE A - INGEST - manual, no scheduler exists"]
+        direction TB
+        TRIG["POST /load_new_kbtopics<br/>curl, Swagger, or app/load_new_kbtopics_task.py<br/>NOTHING calls this automatically"]
+        GROUPS["select groups where managed = true"]
+        FETCH["select messages where<br/>timestamp >= group.last_ingest<br/>and sender != bot"]
+        EMPTY{"any messages?"}
+        SPLIT["split_messages<br/>gap 2h | min 25 | max 200 | overlap 5"]
+        LOOP["for each chunk"]
+        DEID["_get_speaker_mapping<br/>phone numbers -> user_1, user_2<br/>bot -> 'bot'"]
+        LLM1["conversation_splitter.j2<br/>max_tokens 10000, retries 5<br/>output: List[Topic]"]
+        REID["_deid_text reverses the mapping<br/>on subject + summary"]
+        EMB1["voyage_embed_text<br/>voyage-3, 1024 dims"]
+        WRITE["bulk_upsert kbtopic<br/>+ insert kb_topic_message links"]
+        BUMP["group.last_ingest = now<br/>commit"]
+
+        TRIG --> GROUPS --> FETCH --> EMPTY
+        EMPTY -->|"no"| SKIP(["log 'No messages found', skip group"])
+        EMPTY -->|"yes"| SPLIT --> LOOP --> DEID --> LLM1 --> REID --> EMB1 --> WRITE --> BUMP
+        BUMP -.->|"next chunk"| LOOP
+    end
+
+    subgraph STORAGE["SHARED STORAGE"]
+        direction TB
+        KBT[("kbtopic<br/>embedding vector(1024)<br/>HNSW cosine index")]
+        LINK[("kb_topic_message")]
+        MSG[("message<br/>GIN index on<br/>to_tsvector(simple, text)")]
+    end
+
+    subgraph QUERY["PIPELINE B - QUERY - live, on every mention"]
+        direction TB
+        ASK["user mentions the bot<br/>with a question"]
+        HIST["load last 7 messages<br/>as context"]
+        REPH["rephrase.j2<br/>-> short English query"]
+        EMB2["voyage_embed_text<br/>on the rephrased query"]
+        HYB["hybrid_search"]
+        VEC["vector_search<br/>cosine distance<br/>limit 10"]
+        KW["keyword_search<br/>plainto_tsquery(simple)<br/>limit 20"]
+        MERGE["merge by topic id<br/>keyword-only hits get<br/>distance 1.0<br/>sort by vector distance"]
+        FMT["format_search_results_for_prompt<br/>applies opt_out display names"]
+        GEN["rag.j2 -> answer"]
+        REPLY["send to group"]
+
+        ASK --> HIST --> REPH --> EMB2 --> HYB
+        HYB --> VEC
+        HYB --> KW
+        VEC --> MERGE
+        KW --> MERGE
+        MERGE --> FMT --> GEN --> REPLY
+    end
+
+    WRITE --> KBT
+    WRITE --> LINK
+    VEC -.->|"reads"| KBT
+    KW -.->|"reads"| MSG
+    MERGE -.->|"get_messages_for_topic"| LINK
+
+    GATE["HARD DEPENDENCY<br/>Pipeline B returns 'No related topics found'<br/>until Pipeline A has run at least once.<br/>This looks like a bug but is correct behaviour."]
+    INGEST -.-> GATE
+    GATE -.-> QUERY
+
+    BUG["KNOWN ISSUE - last_ingest advances INSIDE the loop.<br/>If the run dies at chunk 7 of 20, last_ingest already moved to now,<br/>so the remaining 13 chunks are never ingested - a permanent gap.<br/>Relevant with rate-limited free-tier models."]
+    BUMP -.-> BUG
+
+    classDef manual fill:#fdf1e3,stroke:#9c5a1a,color:#5c3410
+    classDef llm fill:#f4f1fa,stroke:#5b4a96,color:#332a57
+    classDef db fill:#eceff3,stroke:#4a5568,color:#232a35
+    classDef warn fill:#fdeaea,stroke:#b3261e,color:#6b1614
+    classDef live fill:#e9eef8,stroke:#2c4a8a,color:#1a2c52
+
+    class TRIG,GROUPS,FETCH,SPLIT,LOOP,WRITE,BUMP,DEID,REID manual
+    class LLM1,GEN,REPH,EMB1,EMB2 llm
+    class KBT,LINK,MSG db
+    class GATE,BUG warn
+    class ASK,HIST,HYB,VEC,KW,MERGE,FMT,REPLY live

@@ -103,32 +103,21 @@ docker compose -f docker-compose.prod.yml up -d
 
 ### 4. Connect your device
 
-1. Open http://localhost:3000
+1. Open http://localhost:3003 (gowa's UI; in production it is behind Traefik at `https://$GOWA_HOST`)
 2. Scan the QR code with your WhatsApp mobile app.
 3. Invite the bot device to any target groups you want to summarize.
 4. Restart service: `docker compose restart wa_llm-web-server`
 
 ### 5. Activating the Bot for a Group
 
-1. open pgAdmin or any other posgreSQL admin tool
-2. connect using
-   | Parameter | Value |
-   | --------- | --------- |
-   | Host | localhost |
-   | Port | 5432 |
-   | Database | postgres |
-   | Username | user |
-   | Password | password |
+Open the admin page at `http://localhost:8000/admin` (in production: `https://$WA_LLM_HOST/admin`, behind Authentik). It lists every group the bot is in, with per-group stats, and lets you:
 
-3. run the following update statement:
+- **Turn the bot on or off** for a group. Turning it on opens a confirmation showing how many messages have piled up. Keep **"Start from now"** checked unless you want that history summarized and ingested: the bot stores messages from unmanaged groups too, so a group it has sat in for months would otherwise send its whole backlog to the LLM in the first summary.
+- **Toggle spam alerts** (`notify_on_spam`). Only possible when the group has an owner to tag.
+- **Edit community keys.** Groups sharing a key receive each other's summaries *and* share one knowledge-base search.
+- **Run a knowledge-base ingest or send a summary** for one group. Jobs run in the background and report their real outcome — including "skipped: fewer than 15 new messages".
 
-   ```
-       UPDATE public."group"
-       SET managed = true
-       WHERE group_name = 'Your Group Name';
-   ```
-
-4. Restart the service: `docker compose restart wa_llm-web-server`
+No restart is needed. The same settings are plain columns on the `"group"` table if you ever need SQL.
 
 ### 6. API usage
 
@@ -172,6 +161,26 @@ To deploy in a production environment using the optimized configuration:
 This configuration includes:
 
 - Automatic restart policies (`restart: always`)
+- **No published ports for the web server or gowa.** Both are reached only through [Traefik](https://traefik.io/) with [Authentik](https://goauthentik.io/) forward-auth in front. Postgres is still published on `5432`.
+
+It expects an existing Traefik instance with an Authentik forward-auth middleware. Set these in the environment compose reads (for Komodo, the stack's Environment):
+
+| Variable               | Description                                      | Default             |
+| ---------------------- | ------------------------------------------------ | ------------------- |
+| `WA_LLM_HOST`          | Hostname for the web server / admin page         | – (required)        |
+| `GOWA_HOST`            | Hostname for gowa's UI (QR pairing)              | – (required)        |
+| `TRAEFIK_NETWORK`      | Traefik's external docker network                | `proxy`             |
+| `TRAEFIK_ENTRYPOINT`   | Traefik entrypoint with TLS                      | `websecure`         |
+| `AUTHENTIK_MIDDLEWARE` | Traefik middleware doing Authentik forward-auth  | `authentik@docker`  |
+| `FORWARDED_ALLOW_IPS`  | Proxies uvicorn trusts for `X-Forwarded-*`. Narrow it to Traefik's IP/subnet; `*` trusts any container on the network | `*` |
+
+Because port 8000 is no longer published, run the helper scripts in `app/` inside the container:
+
+```bash
+docker compose -f docker-compose.prod.yml exec web-server python app/load_new_kbtopics_task.py
+```
+
+See [`docs/plans/security-hardening.md`](docs/plans/security-hardening.md) for the remaining hardening (webhook signatures, secrets, gowa credentials).
 
 ---
 

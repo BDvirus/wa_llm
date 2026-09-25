@@ -1,0 +1,68 @@
+---
+title: wa_llm - Architecture Boundary (gowa vs application code)
+---
+flowchart TB
+    subgraph GOWA["gowa service - Go container - aldinokemal2104/go-whatsapp-web-multidevice:v9.3.1"]
+        WM["whatsmeow<br/>WhatsApp protocol"]
+        QR["QR pairing<br/>session storage"]
+        MEDIA["media download<br/>/app/statics"]
+        HOOK["webhook emitter"]
+        WMDB[("webhook_db<br/>whatsmeow_* tables")]
+        WM --- QR
+        WM --- MEDIA
+        WM --- HOOK
+        WM --- WMDB
+    end
+
+    subgraph SDK["gowa_sdk - Python pip package - ~80 async methods"]
+        BASE["GoWaBaseClient<br/>httpx + basic auth"]
+        MIX["8 mixins: app, device, user, send,<br/>message, chat, group, newsletter"]
+        WHM["WebhookEnvelope<br/>WebhookMessagePayload<br/>extra=allow"]
+        BASE --- MIX
+    end
+
+    subgraph APP["wa_llm - application code"]
+        CLIENT["WhatsAppClient<br/>src/whatsapp/client.py - 29 lines<br/>adds only get_my_jid"]
+        JID["jid.py - 124 lines<br/>OWN parser, not from gowa"]
+        FROMHOOK["Message.from_webhook<br/>Reaction.from_webhook"]
+        REEXPORT["whatsapp/__init__.py<br/>re-exports 20+ SDK types"]
+        HANDLER["MessageHandler<br/>Router / RAG / spam"]
+        APPDB[("postgres<br/>message, group, sender,<br/>kbtopic, reaction, opt_out")]
+        CLIENT --- JID
+        FROMHOOK --> HANDLER
+        HANDLER --- APPDB
+    end
+
+    HOOK -->|"POST /webhook<br/>JSON"| WHM
+    WHM --> FROMHOOK
+    CLIENT -->|"HTTP calls"| BASE
+    MIX -->|"REST"| WM
+    REEXPORT -.->|"imports"| WHM
+
+    USED["ACTUALLY USED IN PRODUCTION - only 3 of ~80:<br/>send_message | get_devices | get_user_groups<br/>(get_user_info + login appear in tests only)"]
+    UNUSED["AVAILABLE BUT UNUSED - the extension surface:<br/>send_image/video/file/poll/location | react_to_message<br/>add/remove/promote participants | set_group_topic/photo<br/>join_group_with_link | list_chats | download_message_media"]
+
+    MIX -.-> USED
+    MIX -.-> UNUSED
+
+    GAP["LEAK IN THE BOUNDARY<br/>WebhookMessagePayload declares NO media fields.<br/>image/video/document arrive as untyped dict via extra=allow.<br/>_extract_media_path guesses keys: media_path, path, url, direct_path.<br/>A renamed field fails silently - message is dropped, pyright cannot catch it."]
+    WHM -.-> GAP
+    GAP -.-> FROMHOOK
+
+    SEPDB["Two SEPARATE databases on the same Postgres server.<br/>No shared tables. The whatsmeow_ filter in migrations/env.py<br/>is a leftover from when they did share."]
+    WMDB -.- SEPDB
+    APPDB -.- SEPDB
+
+    classDef go fill:#e8f4ea,stroke:#2d6a4f,color:#1b3a2b
+    classDef sdk fill:#e9eef8,stroke:#2c4a8a,color:#1a2c52
+    classDef app fill:#fdf1e3,stroke:#9c5a1a,color:#5c3410
+    classDef warn fill:#fdeaea,stroke:#b3261e,color:#6b1614
+    classDef note fill:#f4f1fa,stroke:#5b4a96,color:#332a57
+    classDef db fill:#eceff3,stroke:#4a5568,color:#232a35
+
+    class WM,QR,MEDIA,HOOK go
+    class BASE,MIX,WHM sdk
+    class CLIENT,JID,FROMHOOK,REEXPORT,HANDLER app
+    class GAP warn
+    class USED,UNUSED,SEPDB note
+    class WMDB,APPDB db

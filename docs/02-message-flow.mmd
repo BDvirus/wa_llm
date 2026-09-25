@@ -1,0 +1,79 @@
+---
+title: wa_llm - Incoming message decision tree (src/handler/__init__.py)
+---
+flowchart TD
+    START(["POST /webhook<br/>WebhookEnvelope"]) --> EVT{"event type?"}
+
+    EVT -->|"group.*"| GSYNC["gather_groups<br/>sync group table"]
+    EVT -->|"message /<br/>message.reaction"| STORE["store_message<br/>upsert sender, group, message"]
+    EVT -->|"anything else"| IGN1(["ignored"])
+    GSYNC --> OK(["return ok"])
+
+    STORE --> COMMIT["session.commit<br/>persist immediately so a later<br/>failure cannot roll the message back"]
+    COMMIT --> HASTEXT{"message exists<br/>and has text?"}
+    HASTEXT -->|"no"| STOP1(["return"])
+
+    HASTEXT -->|"yes"| SELF{"sender == bot jid?"}
+    SELF -->|"yes"| STOP2(["return - avoid self-reply loop"])
+
+    SELF -->|"no"| ISDM{"message.group is None?<br/>(direct message)"}
+
+    ISDM -->|"yes - DM"| CMD{"text.strip.lower"}
+    CMD -->|"opt-out"| OO["insert OptOut<br/>reply: you will no longer be tagged"]
+    CMD -->|"opt-in"| OI["delete OptOut<br/>reply: you will now be tagged"]
+    CMD -->|"status"| OS["reply: currently opted in/out"]
+    CMD -->|"anything else"| AUTO{"DM_AUTOREPLY_ENABLED?"}
+    AUTO -->|"true"| AUTOMSG["send DM_AUTOREPLY_MESSAGE"]
+    AUTO -->|"false"| STOP3(["return - silent"])
+    OO --> STOP4(["return"])
+    OI --> STOP4
+    OS --> STOP4
+    AUTOMSG --> STOP4
+
+    ISDM -->|"no - group"| DEDUPE{"message_id in<br/>TTLCache?<br/>maxsize 1000, ttl 4 min"}
+    DEDUPE -->|"yes"| STOP5(["return - duplicate webhook"])
+
+    DEDUPE -->|"no - mark as seen"| KBQA{"text starts with<br/>'/kb_qa '?"}
+
+    KBQA -->|"yes"| WL{"chat_jid in<br/>QA_TEST_GROUPS?"}
+    WL -->|"no"| SILENT1(["SILENT FAILURE<br/>log warning only"])
+    WL -->|"yes"| TESTER{"sender_jid in<br/>QA_TESTERS?"}
+    TESTER -->|"no"| SILENT2(["SILENT FAILURE<br/>log warning only"])
+    TESTER -->|"yes"| KBQAH["KBQAHandler<br/>cross-group KB search<br/>works even if group is NOT managed"]
+    KBQAH --> SEND
+
+    KBQA -->|"no"| MANAGED{"group.managed?"}
+    MANAGED -->|"false"| STOP6(["return - message stored but bot stays silent"])
+
+    MANAGED -->|"true"| MENTION{"bot mentioned?<br/>'@' + bot number in text"}
+
+    MENTION -->|"yes"| ROUTER["Router: LLM intent classification"]
+    ROUTER --> INTENT{"intent"}
+    INTENT -->|"summarize"| SUM["last 24h, max 30 messages<br/>-> summarize.j2"]
+    INTENT -->|"ask_question"| RAG["KnowledgeBaseAnswers<br/>rephrase -> embed -> hybrid_search -> rag.j2"]
+    INTENT -->|"about"| ABOUT["static self-introduction"]
+    INTENT -->|"other"| DEF["static fallback reply"]
+    SUM --> SEND
+    RAG --> SEND
+    ABOUT --> SEND
+    DEF --> SEND
+
+    MENTION -->|"no"| SPAMFLAG{"group.notify_on_spam<br/>AND text contains<br/>chat.whatsapp.com link?"}
+    SPAMFLAG -->|"no"| STOP7(["return - passive logging only"])
+    SPAMFLAG -->|"yes"| SPAM["spam agent: score 1-5 + explanation<br/>context = last 10 messages<br/>tags the group owner"]
+    SPAM --> SEND
+
+    SEND["send_message via gowa<br/>+ store the reply as a Message"]
+    SEND --> OK
+
+    classDef terminal fill:#eceff3,stroke:#4a5568,color:#232a35
+    classDef danger fill:#fdeaea,stroke:#b3261e,color:#6b1614
+    classDef action fill:#e8f4ea,stroke:#2d6a4f,color:#1b3a2b
+    classDef llm fill:#f4f1fa,stroke:#5b4a96,color:#332a57
+    classDef gate fill:#fdf1e3,stroke:#9c5a1a,color:#5c3410
+
+    class STOP1,STOP2,STOP3,STOP4,STOP5,STOP6,STOP7,IGN1,OK terminal
+    class SILENT1,SILENT2 danger
+    class STORE,COMMIT,GSYNC,SEND,OO,OI,OS,AUTOMSG action
+    class ROUTER,SUM,RAG,SPAM,KBQAH llm
+    class MANAGED,MENTION,DEDUPE,SPAMFLAG,WL,TESTER gate

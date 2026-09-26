@@ -1,0 +1,30 @@
+{% set base = "/admin/groups/" ~ (group_jid | urlencode) ~ "/topics/" ~ (topic.id | urlencode) %}
+<article class="topic" id="t-{{ topic.id }}">
+  <header class="topic__head">
+    <h2 class="topic__subject" dir="auto">{{ topic.subject }}</h2>
+    <p class="topic__meta">
+      <span>{{ topic.start_time | relative }}</span>
+      <span><span class="num">{{ topic.messages }}</span> הודעות מקור</span>
+      {% if topic.speakers %}<span>{{ topic.speakers | join(", ") }}</span>{% endif %}
+    </p>
+  </header>
+  <p class="topic__summary" dir="auto">{{ topic.summary }}</p>
+  <div class="topic__actions">
+    <button type="button" class="btn btn--small" hx-get="{{ base }}/edit"
+            hx-target="#t-{{ topic.id }}" hx-swap="outerHTML">עריכה</button>
+    {% if topic.messages %}
+    <button type="button" class="btn btn--small" hx-get="{{ base }}/messages"
+            hx-target="#t-{{ topic.id }}-sources" hx-swap="innerHTML">הודעות מקור</button>
+    {% endif %}
+    <span class="topic__danger">
+      <button type="button" class="btn btn--small btn--quiet-danger" hx-post="{{ base }}/delete"
+              hx-confirm="למחוק את הנושא «{{ topic.subject }}» מבסיס הידע? ההודעות עצמן יישארו."
+              hx-target="#t-{{ topic.id }}" hx-swap="outerHTML">מחיקת נושא</button>
+      {% if topic.messages %}
+      <button type="button" class="btn btn--small btn--danger" hx-get="{{ base }}/purge"
+              hx-target="#dialog-body">מחיקה כולל הודעות</button>
+      {% endif %}
+    </span>
+  </div>
+  <div id="t-{{ topic.id }}-sources" class="topic__sources"></div>
+</article>

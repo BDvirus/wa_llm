@@ -1,0 +1,10 @@
+<ol class="sources">
+  {% for m in messages %}
+  <li>
+    <p class="sources__meta"><strong>{{ m.sender }}</strong> · {{ m.timestamp | relative }}</p>
+    <p class="sources__text" dir="auto">{{ m.text }}</p>
+  </li>
+  {% else %}
+  <li class="sources__empty">אין הודעות מקור שמורות.</li>
+  {% endfor %}
+</ol>

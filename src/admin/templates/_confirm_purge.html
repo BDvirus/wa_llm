@@ -1,0 +1,32 @@
+{% set base = "/admin/groups/" ~ (group_jid | urlencode) ~ "/topics/" ~ (topic.id | urlencode) %}
+<form class="confirm" hx-post="{{ base }}/delete"
+      hx-target="#t-{{ topic.id }}" hx-swap="outerHTML">
+  <input type="hidden" name="with_messages" value="true">
+
+  <p class="eyebrow">מחיקה כולל הודעות מקור</p>
+  <h2 id="dialog-title">{{ topic.subject }}</h2>
+
+  <dl class="figures">
+    <div class="figure figure--red">
+      <dt>הודעות שיימחקו</dt>
+      <dd class="num">{{ "{:,}".format(preview.messages) }}</dd>
+    </div>
+  </dl>
+
+  <p class="callout callout--red">
+    ההודעות יימחקו לצמיתות, יחד עם התגובות אליהן. הבוט לא יוכל להשתמש בהן יותר: לא בשאלות, לא בחיפוש,
+    לא ב"מה פספסתי" ולא בסיכומים הבאים. אין דרך לשחזר אותן.
+  </p>
+  {% if preview.shared_with %}
+  <div class="callout callout--amber">
+    <p>חלק מההודעות שייכות גם לנושאים האלה. הנושאים יישארו, והסיכום שלהם עלול עדיין להכיל את המידע:</p>
+    <ul>{% for subject in preview.shared_with %}<li>{{ subject }}</li>{% endfor %}</ul>
+  </div>
+  {% endif %}
+  <p class="callout">סיכומים שכבר נשלחו לקבוצה ב-WhatsApp לא יימחקו.</p>
+
+  <div class="actions">
+    <button type="button" class="btn" data-close-dialog>ביטול</button>
+    <button type="submit" class="btn btn--danger">מחיקה לצמיתות</button>
+  </div>
+</form>

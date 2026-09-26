@@ -12,6 +12,7 @@ import logfire
 from admin.jobs import JobRegistry
 from admin.router import STATIC_DIR as ADMIN_STATIC_DIR
 from admin.router import router as admin_router
+from admin.topic_routes import router as admin_topics_router
 from api import load_new_kbtopics_api, status, summarize_and_send_to_group_api, webhook
 import models  # noqa
 from config import get_settings
@@ -94,6 +95,7 @@ app.include_router(status.router)
 app.include_router(summarize_and_send_to_group_api.router)
 app.include_router(load_new_kbtopics_api.router)
 app.include_router(admin_router)
+app.include_router(admin_topics_router)
 # Mounted on the app itself: include_router() does not carry mounts over.
 app.mount("/admin/static", StaticFiles(directory=ADMIN_STATIC_DIR), name="admin-static")
 

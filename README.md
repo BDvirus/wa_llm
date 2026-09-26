@@ -116,6 +116,10 @@ Open the admin page at `http://localhost:8000/admin` (in production: `https://$W
 - **Toggle spam alerts** (`notify_on_spam`). Only possible when the group has an owner to tag.
 - **Edit community keys.** Groups sharing a key receive each other's summaries *and* share one knowledge-base search.
 - **Run a knowledge-base ingest or send a summary** for one group. Jobs run in the background and report their real outcome — including "skipped: fewer than 15 new messages".
+- **Manage the knowledge base.** Click a group's topic count to browse its topics (filter by text, see source messages). You can:
+  - **Edit** a topic's subject or summary. Saving re-embeds it with Voyage; if that fails, nothing is saved.
+  - **Delete a topic.** Its source messages stay, so they still show up in search and summaries.
+  - **Delete a topic with its source messages** — for sensitive content. This permanently removes the messages and their reactions, so the bot can no longer use them anywhere. The confirmation names any other topic built from the same messages, since that topic's summary may still contain the information. Summaries already sent to WhatsApp can't be recalled.
 
 No restart is needed. The same settings are plain columns on the `"group"` table if you ever need SQL.
 

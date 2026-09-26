@@ -77,7 +77,8 @@
   </td>
 
   <td class="c-num" data-label="ידע">
-    <span class="num num--lg">{{ "{:,}".format(row.topics) }}</span>
+    <a class="num num--lg num-link" href="/admin/groups/{{ row.group_jid | urlencode }}/topics"
+       aria-label="ניהול {{ row.topics }} הנושאים של {{ row.display_name }}">{{ "{:,}".format(row.topics) }}</a>
     <span class="sub">נושאים</span>
   </td>
 

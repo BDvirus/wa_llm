@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}ידע · {{ group.group_name or group_jid }}{% endblock %}
+{% block content %}
+{% set jid = group_jid | urlencode %}
+<header class="masthead">
+  <div class="masthead__text">
+    <p class="eyebrow"><a class="back" href="/admin">→ כל הקבוצות</a></p>
+    <h1><bdi>{{ group.group_name or "ללא שם" }}</bdi></h1>
+    <p class="stats">
+      <span class="stat"><span id="topic-total" class="num">{{ "{:,}".format(total) }}</span> נושאים בבסיס הידע</span>
+    </p>
+  </div>
+  <form class="filter" method="get" action="/admin/groups/{{ jid }}/topics"
+        hx-get="/admin/groups/{{ jid }}/topics" hx-trigger="input changed delay:350ms from:input, submit"
+        hx-target="#topic-list" hx-select="#topic-list" hx-swap="outerHTML" hx-push-url="true">
+    <label>
+      <span class="visually-hidden">סינון נושאים</span>
+      <input type="search" name="q" value="{{ q }}" placeholder="סינון לפי כותרת או סיכום…" autocomplete="off">
+    </label>
+  </form>
+</header>
+
+<section id="topic-list" class="topics" aria-label="נושאים">
+  {% if q and result.topics %}<p class="matches"><span class="num">{{ "{:,}".format(result.total) }}</span> נושאים תואמים ל«{{ q }}»</p>{% endif %}
+  {% for topic in result.topics %}{% include "_topic.html" %}{% endfor %}
+  {% if not result.topics %}
+  <div class="empty">
+    {% if q %}<p>אין נושאים שתואמים ל«{{ q }}».</p>
+    {% else %}<p><strong>אין עדיין נושאים.</strong></p>
+    <p>נושאים נוצרים כשבונים ידע לקבוצה (כפתור "בניית ידע" בעמוד הראשי).</p>{% endif %}
+  </div>
+  {% endif %}
+
+  {% if result.pages > 1 %}
+  <nav class="pager" aria-label="עמודים">
+    {% if result.page > 1 %}
+    <a class="btn btn--small" href="?q={{ q | urlencode }}&page={{ result.page - 1 }}">הקודם</a>
+    {% endif %}
+    <span class="pager__at">עמוד <span class="num">{{ result.page }}</span> מתוך <span class="num">{{ result.pages }}</span></span>
+    {% if result.page < result.pages %}
+    <a class="btn btn--small" href="?q={{ q | urlencode }}&page={{ result.page + 1 }}">הבא</a>
+    {% endif %}
+  </nav>
+  {% endif %}
+</section>
+{% endblock %}

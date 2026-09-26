@@ -1,0 +1,19 @@
+{% set base = "/admin/groups/" ~ (group_jid | urlencode) ~ "/topics/" ~ (topic.id | urlencode) %}
+<article class="topic topic--editing" id="t-{{ topic.id }}">
+  <form hx-post="{{ base }}" hx-target="#t-{{ topic.id }}" hx-swap="outerHTML">
+    <label class="field">
+      <span>כותרת</span>
+      <input type="text" dir="auto" name="subject" value="{{ topic.subject }}" required maxlength="500">
+    </label>
+    <label class="field">
+      <span>סיכום</span>
+      <textarea dir="auto" name="summary" rows="8" required>{{ topic.summary }}</textarea>
+    </label>
+    <p class="hint">בשמירה מחושב embedding חדש, כך שהחיפוש ימצא את הנוסח המעודכן.</p>
+    <div class="actions">
+      <button type="button" class="btn" hx-get="{{ base }}"
+              hx-target="#t-{{ topic.id }}" hx-swap="outerHTML">ביטול</button>
+      <button type="submit" class="btn btn--primary">שמירה</button>
+    </div>
+  </form>
+</article>

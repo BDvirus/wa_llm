@@ -18,3 +18,8 @@ async def voyage_embed_text(
         embeddings += res.embeddings
         total_tokens += res.total_tokens
     return embeddings
+
+
+def topic_document(subject: str, summary: str) -> str:
+    """The text a KB topic is embedded from - shared by ingest and admin edits."""
+    return f"# {subject}\n{summary}"

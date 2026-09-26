@@ -22,7 +22,7 @@ from models import KBTopicCreate, Group, Message
 from models.knowledge_base_topic import KBTopic
 from models.upsert import bulk_upsert
 from services.prompt_manager import prompt_manager
-from utils.voyage_embed_text import voyage_embed_text
+from utils.voyage_embed_text import topic_document, voyage_embed_text
 from whatsapp import WhatsAppClient
 
 logger = logging.getLogger(__name__)
@@ -212,7 +212,7 @@ async def load_topics(
 ):
     if len(topics) == 0:
         return
-    documents = [f"# {topic.subject}\n{topic.summary}" for topic in topics]
+    documents = [topic_document(topic.subject, topic.summary) for topic in topics]
     topics_embeddings = await voyage_embed_text(embedding_client, documents)
 
     doc_models = [
